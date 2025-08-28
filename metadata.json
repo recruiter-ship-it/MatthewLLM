@@ -1,0 +1,6 @@
+{
+  "name": "MatthewLM Recruiting Tool (Beta)",
+  "description": "A recruiting platform for managing vacancies, resumes, and interviews, with user authentication via Google, Telegram, or as a guest.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

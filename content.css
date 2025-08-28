@@ -1,0 +1,19 @@
+
+.matthewlm-highlight {
+    background-color: #fde047; /* yellow-300 */
+    color: #1f2937; /* gray-800 */
+    padding: 2px 1px;
+    border-radius: 3px;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    animation: fade-in-highlight 0.5s ease-in-out;
+}
+
+@keyframes fade-in-highlight {
+    from {
+        background-color: #fef9c3; /* yellow-100 */
+    }
+    to {
+        background-color: #fde047; /* yellow-300 */
+    }
+}
