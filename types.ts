@@ -33,7 +33,7 @@ export interface AnalysisResult {
   title: string;
   summary: string;
   pros: string[];
-  cons: string[];
+  cons:string[];
   questionsForInterview: string[];
   contactInfo: ContactInfo;
 }
@@ -72,13 +72,24 @@ export interface Vacancy {
   };
 }
 
+export interface KanbanColumn {
+  id: string;
+  title: string;
+}
+
+export interface KanbanSwimlane {
+  id: string;
+  title: string;
+}
+
 export interface Task {
   id: string;
   title: string;
-  priority: Priority;
   description: string;
   dueDate?: string; // ISO date string
-  isCompleted: boolean;
+  columnId: string;
+  swimlaneId: string;
+  priority: Priority;
 }
 
 export interface HiringManagerSummary {

@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 import { Vacancy, CandidateResume, AnalysisResult } from '../types';
-import { X, BotMessageSquare, Clipboard, Users, FileIcon, Trash2, Sparkles, Plus } from './icons/Icons';
+import { X, BotMessageSquare, Clipboard, Users, FileIcon, Trash2, Sparkles, Plus, UploadCloud } from './icons/Icons';
 import PdfViewer from './PdfViewer';
 import ResumeAnalysisModal from './ResumeAnalysisModal';
 
@@ -38,6 +38,7 @@ const VacancyDetailView: React.FC<VacancyDetailProps> = ({ vacancy, onClose, onU
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [copiedQuery, setCopiedQuery] = useState<number | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<CandidateResume | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const resumeInputRef = useRef<HTMLInputElement>(null);
   
   const handleAnalyzeResume = async (resumeId: string) => {
@@ -175,9 +176,8 @@ ${resumeText}
   const handleAddResumeClick = () => {
     resumeInputRef.current?.click();
   };
-
-  const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  
+  const handleNewResumeFiles = useCallback(async (files: File[] | FileList | null) => {
     if (!files || files.length === 0) return;
 
     const newResumesPromises = Array.from(files).map(async (file) => {
@@ -199,7 +199,13 @@ ${resumeText}
       resumes: [...(vacancy.resumes || []), ...newResumes],
     };
     onUpdate(updatedVacancy);
-    e.target.value = '';
+  }, [vacancy, onUpdate]);
+
+  const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleNewResumeFiles(e.target.files);
+    if (e.target) {
+        e.target.value = '';
+    }
   };
 
   const handleDeleteResume = (resumeId: string) => {
@@ -221,7 +227,41 @@ ${resumeText}
       </div>
     );
   };
+
+  // Drag and Drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    handleNewResumeFiles(e.dataTransfer.files);
+  };
   
+  const sortedResumes = useMemo(() => {
+    if (!vacancy.resumes) return [];
+    return [...vacancy.resumes].sort((a, b) => {
+      const aScore = a.analysis?.matchPercentage;
+      const bScore = b.analysis?.matchPercentage;
+      if (aScore !== undefined && bScore !== undefined) return bScore - aScore;
+      if (aScore !== undefined) return -1;
+      if (bScore !== undefined) return 1;
+      return 0;
+    });
+  }, [vacancy.resumes]);
+
   return (
     <>
     <div className="fixed inset-0 bg-black/50 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -239,7 +279,10 @@ ${resumeText}
             <div className="bg-white rounded-xl overflow-hidden h-full flex flex-col">
               <PdfViewer pdfUrl={vacancy.briefUrl} />
             </div>
-            <div className="bg-white/10 rounded-xl p-4 overflow-y-auto flex flex-col">
+            <div 
+              className="bg-white/10 rounded-xl p-4 overflow-y-auto flex flex-col"
+              onDragEnter={handleDragEnter}
+            >
                 <div>
                   <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><BotMessageSquare /> AI Ассистент</h3>
                   
@@ -283,12 +326,12 @@ ${resumeText}
                 </div>
 
                 {/* Candidates Section */}
-                <div className="mt-8 pt-6 border-t border-white/20 flex-grow flex flex-col">
+                <div className="mt-8 pt-6 border-t border-white/20 flex-grow flex flex-col relative">
                     <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><Users /> Кандидаты</h3>
                     <div className="flex-grow overflow-y-auto pr-2">
-                        {(vacancy.resumes && vacancy.resumes.length > 0) ? (
+                        {(sortedResumes && sortedResumes.length > 0) ? (
                             <ul className="space-y-3">
-                                {(vacancy.resumes || []).map(resume => (
+                                {sortedResumes.map(resume => (
                                     <li 
                                         key={resume.id}
                                         onClick={() => resume.analysis && setViewingAnalysis(resume)}
@@ -336,6 +379,21 @@ ${resumeText}
                             Добавить резюме
                         </button>
                     </div>
+                    {isDragging && (
+                      <div 
+                        className="absolute inset-0 z-10 bg-blue-800/20 backdrop-blur-sm border-4 border-dashed border-blue-400 rounded-xl"
+                        onDragLeave={handleDragLeave}
+                        onDragOver={handleDragOver}
+                        onDrop={handleDrop}
+                      >
+                         <div className="w-full h-full flex items-center justify-center pointer-events-none">
+                            <div className="text-center font-bold text-white">
+                                <UploadCloud className="w-16 h-16 mx-auto mb-2"/>
+                                <p>Отпустите PDF файлы резюме</p>
+                            </div>
+                        </div>
+                      </div>
+                    )}
                 </div>
             </div>
         </div>

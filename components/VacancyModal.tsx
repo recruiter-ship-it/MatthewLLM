@@ -42,6 +42,8 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
   const [briefText, setBriefText] = useState('');
   const [error, setError] = useState('');
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isDraggingBrief, setIsDraggingBrief] = useState(false);
 
   useEffect(() => {
     if (vacancy) {
@@ -66,30 +68,46 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
     }
     setError('');
     setIsGeneratingImage(false);
+    setIsDraggingImage(false);
+    setIsDraggingBrief(false);
   }, [vacancy, isOpen]);
+  
+  const handleImageFile = async (file: File | null) => {
+    if (file) {
+        if (!file.type.startsWith('image/')) {
+            setError('Пожалуйста, загрузите файл изображения.');
+            return;
+        }
+        const dataUrl = await fileToDataUrl(file);
+        setImageUrl(dataUrl);
+    }
+  };
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const dataUrl = await fileToDataUrl(file);
-      setImageUrl(dataUrl);
+    handleImageFile(e.target.files?.[0] || null);
+  };
+
+  const handleBriefFile = async (file: File | null) => {
+    if (file) {
+        if (file.type !== 'application/pdf') {
+            setError('Пожалуйста, загрузите PDF файл.');
+            return;
+        }
+        const dataUrl = await fileToDataUrl(file);
+        setBriefUrl(dataUrl);
+        setBriefFileName(file.name);
+        try {
+            const text = await extractTextFromPdfDataUrl(dataUrl);
+            setBriefText(text);
+        } catch (error) {
+            console.error("Failed to parse PDF text:", error);
+            setError("Не удалось извлечь текст из PDF. Файл может быть поврежден.")
+        }
     }
   };
 
   const handleBriefChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const dataUrl = await fileToDataUrl(file);
-      setBriefUrl(dataUrl);
-      setBriefFileName(file.name);
-      try {
-        const text = await extractTextFromPdfDataUrl(dataUrl);
-        setBriefText(text);
-      } catch (error) {
-        console.error("Failed to parse PDF text:", error);
-        setError("Не удалось извлечь текст из PDF. Файл может быть поврежден.")
-      }
-    }
+    handleBriefFile(e.target.files?.[0] || null);
   };
 
   const handleGenerateImage = async () => {
@@ -104,7 +122,7 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
         const prompt = `A professional and clean 3D icon representing a job vacancy for a "${title}". Minimalist design, on a light-colored background.`;
 
         const response = await ai.models.generateImages({
-            model: 'imagen-3.0-generate-002',
+            model: 'imagen-4.0-generate-001',
             prompt: prompt,
             config: {
               numberOfImages: 1,
@@ -146,6 +164,26 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
       briefText,
     });
   };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleImageDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingImage(false);
+    handleImageFile(e.dataTransfer.files?.[0] || null);
+  };
+  
+  const handleBriefDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingBrief(false);
+    handleBriefFile(e.dataTransfer.files?.[0] || null);
+  };
+
 
   if (!isOpen) return null;
 
@@ -208,13 +246,19 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
           
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">Изображение для карточки *</label>
-            <div className="w-full aspect-video flex items-center justify-center border-2 border-dashed border-gray-500 rounded-lg bg-white/5 overflow-hidden relative">
+            <div 
+              className={`w-full aspect-video flex items-center justify-center border-2 border-dashed rounded-lg bg-white/5 overflow-hidden relative transition-colors ${isDraggingImage ? 'border-blue-400 bg-blue-500/20' : 'border-gray-500'}`}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImage(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImage(false); }}
+              onDragOver={handleDragOver}
+              onDrop={handleImageDrop}
+            >
               {imageUrl ? (
                 <img src={imageUrl} alt="Preview" className="w-full h-full object-cover"/>
               ) : (
-                <div className="text-center text-gray-400">
+                <div className="text-center text-gray-400 pointer-events-none">
                   <UploadCloud className="w-8 h-8 mx-auto"/>
-                  <p className="mt-2 text-sm">Предпросмотр изображения</p>
+                  <p className="mt-2 text-sm">Перетащите изображение сюда</p>
                 </div>
               )}
                {isGeneratingImage && (
@@ -244,16 +288,23 @@ const VacancyModal: React.FC<VacancyModalProps> = ({ isOpen, onClose, onSave, va
           <div>
              <label className="block text-sm font-medium text-gray-300 mb-1">Бриф вакансии (PDF) *</label>
             <input type="file" id="brief-upload" className="hidden" onChange={handleBriefChange} accept=".pdf" />
-            <label htmlFor="brief-upload" className="w-full flex items-center justify-center p-3 border-2 border-dashed border-gray-500 hover:border-white rounded-lg cursor-pointer transition-colors">
+            <label 
+              htmlFor="brief-upload" 
+              className={`w-full flex items-center justify-center p-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${isDraggingBrief ? 'border-blue-400 bg-blue-500/20' : 'border-gray-500 hover:border-white'}`}
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBrief(true); }}
+              onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingBrief(false); }}
+              onDragOver={handleDragOver}
+              onDrop={handleBriefDrop}
+            >
               {briefUrl ? (
-                <div className="flex items-center gap-2 text-green-300">
+                <div className="flex items-center gap-2 text-green-300 pointer-events-none">
                   <FileIcon className="w-5 h-5"/>
                   <span className="font-semibold">{briefFileName}</span>
                 </div>
               ) : (
-                <div className="text-center text-gray-400">
+                <div className="text-center text-gray-400 pointer-events-none">
                   <Paperclip className="w-6 h-6 mx-auto"/>
-                  <p>Загрузить PDF бриф</p>
+                  <p>Перетащите PDF бриф сюда</p>
                 </div>
               )}
             </label>

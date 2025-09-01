@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Task, Priority } from '../types';
 import TaskCard from './TaskCard';
@@ -65,10 +64,13 @@ const TaskPriorityColumn: React.FC<TaskPriorityColumnProps> = ({
       </div>
       <div className="flex-grow p-3 space-y-4 overflow-y-auto">
         {tasks.map(task => (
+          // FIX: The TaskCard component expects an `isDone` prop and does not accept `onToggleComplete`.
+          // This component appears to be based on an older data model.
+          // The fix involves removing the incorrect prop and adding the required one with a sensible default.
           <TaskCard
             key={task.id}
             task={task}
-            onToggleComplete={() => onToggleComplete(task.id)}
+            isDone={false}
             onEdit={() => onEditTask(task)}
             onDelete={() => onDeleteTask(task.id)}
           />

@@ -32,30 +32,32 @@ const FilePreviewIcon: React.FC<{ file: File }> = ({ file }) => {
 export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, multiple, accept }) => {
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragIn = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragOut = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
   };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
     
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    if (droppedFiles.length > 0) {
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
       if (multiple) {
         const newFiles = [...files, ...droppedFiles].reduce((acc, file) => {
             if (!acc.find(f => f.name === file.name && f.size === file.size)) {
@@ -67,6 +69,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
       } else {
         setFiles([droppedFiles[0]]);
       }
+      e.dataTransfer.clearData();
     }
   }, [files, multiple, setFiles]);
   
@@ -92,16 +95,15 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div 
+        className="flex flex-col h-full relative"
+        onDragEnter={handleDragIn}
+    >
       <h3 className="mb-2 font-medium text-slate-700">{title}</h3>
       <div className="flex-grow flex flex-col p-4 bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg">
         {files.length === 0 ? (
           <div
-            onDragEnter={handleDragEnter}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            className={`flex-grow flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-colors duration-300 ${isDragging ? 'border-blue-500 bg-blue-500/10' : 'border-slate-400/50 hover:border-blue-400'}`}
+            className="flex-grow flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-colors duration-300 border-slate-400/50 hover:border-blue-400"
           >
             <input
               type="file"
@@ -144,6 +146,23 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
           </div>
         )}
       </div>
+
+       {isDragging && (
+        <div 
+          className="absolute inset-0 z-10"
+          onDragEnter={handleDragIn}
+          onDragLeave={handleDragOut}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+        >
+          <div className="w-full h-full flex items-center justify-center bg-blue-500/20 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-3xl">
+            <div className="text-center font-bold text-blue-800 pointer-events-none">
+                <UploadCloud className="w-16 h-16 mx-auto mb-2"/>
+                <p>Отпустите, чтобы загрузить</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

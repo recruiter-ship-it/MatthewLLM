@@ -1,7 +1,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { Tab, User, Vacancy, Priority, Task } from './types';
+import { Tab, User, Vacancy, Priority, Task, KanbanColumn, KanbanSwimlane } from './types';
 import Header from './components/Header';
 import Login from './components/Login';
 import ProfileModal from './components/ProfileModal';
@@ -33,11 +33,14 @@ const App: React.FC = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
+  const [kanbanSwimlanes, setKanbanSwimlanes] = useState<KanbanSwimlane[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<StoredUser[]>([]);
   const [isVacancyModalOpen, setIsVacancyModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingVacancy, setEditingVacancy] = useState<Vacancy | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [addingTaskLocation, setAddingTaskLocation] = useState<{columnId: string, swimlaneId: string} | null>(null);
   const [viewingVacancy, setViewingVacancy] = useState<Vacancy | null>(null);
   const [isLoadingStorage, setIsLoadingStorage] = useState<boolean>(true);
   const [isChatWidgetOpen, setIsChatWidgetOpen] = useState<boolean>(false);
@@ -55,38 +58,87 @@ const App: React.FC = () => {
     }
 
     const loadData = async () => {
+      let savedUser: User | null = null;
+      let savedVacancies: Vacancy[] = [];
+      let savedTasks: any[] = []; // Can be old or new format
+      let savedRegisteredUsers: StoredUser[] = [];
+      let savedActiveVacancyId: string | null = null;
+      let savedColumns: KanbanColumn[] = [];
+      let savedSwimlanes: KanbanSwimlane[] = [];
+
       if (IS_EXTENSION) {
-        const data = await window.chrome.storage.local.get(['user', 'vacancies', 'tasks', 'registeredUsers', 'activeVacancyId']);
-        if (data.user) {
-          setUser(data.user);
-          setIsAuthenticated(true);
-        }
-        setVacancies(data.vacancies || []);
-        setTasks(data.tasks || []);
-        setRegisteredUsers(data.registeredUsers || []);
-        setActiveVacancyId(data.activeVacancyId || null);
+        const data = await window.chrome.storage.local.get(['user', 'vacancies', 'tasks', 'registeredUsers', 'activeVacancyId', 'kanbanColumns', 'kanbanSwimlanes']);
+        savedUser = data.user || null;
+        savedVacancies = data.vacancies || [];
+        savedTasks = data.tasks || [];
+        savedRegisteredUsers = data.registeredUsers || [];
+        savedActiveVacancyId = data.activeVacancyId || null;
+        savedColumns = data.kanbanColumns || [];
+        savedSwimlanes = data.kanbanSwimlanes || [];
       } else {
         try {
-          const savedUser = localStorage.getItem('user');
-          if (savedUser) {
-            setUser(JSON.parse(savedUser));
-            setIsAuthenticated(true);
-          }
-          const savedVacancies = localStorage.getItem('vacancies');
-          setVacancies(savedVacancies ? JSON.parse(savedVacancies) : []);
-          const savedTasks = localStorage.getItem('tasks');
-          setTasks(savedTasks ? JSON.parse(savedTasks) : []);
-          const savedRegisteredUsers = localStorage.getItem('registeredUsers');
-          setRegisteredUsers(savedRegisteredUsers ? JSON.parse(savedRegisteredUsers) : []);
-          const savedActiveVacancyId = localStorage.getItem('activeVacancyId');
-          setActiveVacancyId(savedActiveVacancyId || null);
+          const userStr = localStorage.getItem('user');
+          if (userStr) savedUser = JSON.parse(userStr);
+          const vacanciesStr = localStorage.getItem('vacancies');
+          if (vacanciesStr) savedVacancies = JSON.parse(vacanciesStr);
+          const tasksStr = localStorage.getItem('tasks');
+          if (tasksStr) savedTasks = JSON.parse(tasksStr);
+          const regUsersStr = localStorage.getItem('registeredUsers');
+          if (regUsersStr) savedRegisteredUsers = JSON.parse(regUsersStr);
+          savedActiveVacancyId = localStorage.getItem('activeVacancyId');
+          const columnsStr = localStorage.getItem('kanbanColumns');
+          if (columnsStr) savedColumns = JSON.parse(columnsStr);
+          const swimlanesStr = localStorage.getItem('kanbanSwimlanes');
+          if (swimlanesStr) savedSwimlanes = JSON.parse(swimlanesStr);
         } catch (error) {
           console.error("Could not parse data from localStorage", error);
-          setVacancies([]);
-          setTasks([]);
-          setRegisteredUsers([]);
         }
       }
+      
+      if (savedUser) {
+        setUser(savedUser);
+        setIsAuthenticated(true);
+      }
+      setVacancies(savedVacancies);
+      setRegisteredUsers(savedRegisteredUsers);
+      setActiveVacancyId(savedActiveVacancyId);
+
+      // --- Kanban Board Setup & Migration ---
+      const defaultColumns = [
+        { id: 'col-todo-' + Date.now(), title: 'К выполнению' },
+        { id: 'col-inprogress-' + Date.now(), title: 'В работе' },
+        { id: 'col-done-' + Date.now(), title: 'Готово' },
+      ];
+      const defaultSwimlanes = [
+        { id: savedUser?.id || 'user-swimlane-' + Date.now(), title: savedUser?.name || 'Мои задачи' },
+        { id: 'general-swimlane-' + Date.now(), title: 'Общие задачи' },
+      ];
+      
+      const columnsToSet = savedColumns.length > 0 ? savedColumns : defaultColumns;
+      const swimlanesToSet = savedSwimlanes.length > 0 ? savedSwimlanes : defaultSwimlanes;
+
+      setKanbanColumns(columnsToSet);
+      setKanbanSwimlanes(swimlanesToSet);
+
+      const needsMigration = savedTasks.length > 0 && savedTasks[0].priority === undefined;
+
+      if (needsMigration) {
+        const migratedTasks: Task[] = savedTasks.map((t: any) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { priority, isCompleted, ...rest } = t;
+          return {
+            ...rest,
+            description: t.description || '',
+            columnId: t.isCompleted ? columnsToSet[2].id : columnsToSet[0].id,
+            swimlaneId: swimlanesToSet[0].id,
+            priority: Priority.Medium, // Add default priority
+          };
+        });
+        setTasks(migratedTasks);
+      } else {
+        setTasks(savedTasks as Task[]);
+      }
+
       setIsLoadingStorage(false);
     };
     loadData();
@@ -95,24 +147,27 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isLoadingStorage) return; // Don't save initial empty state
     
+    const dataToSave = {
+        vacancies,
+        tasks,
+        registeredUsers,
+        activeVacancyId,
+        kanbanColumns,
+        kanbanSwimlanes,
+    };
+    
     if (IS_EXTENSION) {
-      window.chrome.storage.local.set({ 
-        vacancies: vacancies, 
-        tasks: tasks,
-        registeredUsers: registeredUsers,
-        activeVacancyId: activeVacancyId
-      });
+      window.chrome.storage.local.set(dataToSave);
     } else {
-      localStorage.setItem('vacancies', JSON.stringify(vacancies));
-      localStorage.setItem('tasks', JSON.stringify(tasks));
-      localStorage.setItem('registeredUsers', JSON.stringify(registeredUsers));
-      if (activeVacancyId) {
-        localStorage.setItem('activeVacancyId', activeVacancyId);
-      } else {
-        localStorage.removeItem('activeVacancyId');
+      for (const [key, value] of Object.entries(dataToSave)) {
+          if (value !== null && value !== undefined) {
+             localStorage.setItem(key, JSON.stringify(value));
+          } else {
+             localStorage.removeItem(key);
+          }
       }
     }
-  }, [vacancies, tasks, registeredUsers, activeVacancyId, isLoadingStorage]);
+  }, [vacancies, tasks, registeredUsers, activeVacancyId, kanbanColumns, kanbanSwimlanes, isLoadingStorage]);
 
   const persistUser = (appUser: User | null) => {
     if (IS_EXTENSION) {
@@ -264,28 +319,36 @@ const App: React.FC = () => {
     setVacancies(vacancies.map(v => v.id === id ? { ...v, priority: newPriority } : v));
   };
 
-  // --- Task Handlers ---
-  const handleOpenTaskModal = (task: Task | null = null) => {
+  // --- Task & Kanban Handlers ---
+  const handleOpenTaskModal = (task: Task | null = null, location: {columnId: string, swimlaneId: string} | null = null) => {
     setEditingTask(task);
+    setAddingTaskLocation(location);
     setIsTaskModalOpen(true);
   };
 
   const handleCloseTaskModal = () => {
     setEditingTask(null);
+    setAddingTaskLocation(null);
     setIsTaskModalOpen(false);
   };
 
-  const handleSaveTask = (taskToSave: Omit<Task, 'id' | 'isCompleted'> & { id?: string }) => {
+  const handleSaveTask = (taskToSave: Omit<Task, 'id' | 'columnId' | 'swimlaneId'> & { id?: string }) => {
     if (taskToSave.id) {
       // Update existing
       setTasks(tasks.map(t => t.id === taskToSave.id ? { ...t, ...taskToSave } as Task : t));
     } else {
+      if (!addingTaskLocation) {
+        console.error("Cannot add task without a location on the board.");
+        handleCloseTaskModal();
+        return;
+      }
       // Add new
       const newTask: Task = {
         ...taskToSave,
         id: Date.now().toString(),
-        priority: taskToSave.priority || Priority.Medium,
-        isCompleted: false,
+        columnId: addingTaskLocation.columnId,
+        swimlaneId: addingTaskLocation.swimlaneId,
+        priority: taskToSave.priority || Priority.Medium
       };
       setTasks([...tasks, newTask]);
     }
@@ -296,13 +359,23 @@ const App: React.FC = () => {
     setTasks(tasks.filter(t => t.id !== id));
   };
 
-  const handleTaskPriorityChange = (id: string, newPriority: Priority) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, priority: newPriority } : t));
+  const handleMoveTask = (taskId: string, newColumnId: string, newSwimlaneId: string) => {
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, columnId: newColumnId, swimlaneId: newSwimlaneId } : t));
   };
 
-  const handleToggleTaskComplete = (id: string) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, isCompleted: !t.isCompleted } : t));
+  const handleUpdateColumnTitle = (id: string, title: string) => {
+    setKanbanColumns(kanbanColumns.map(c => c.id === id ? { ...c, title } : c));
   };
+  const handleAddColumn = () => {
+    setKanbanColumns([...kanbanColumns, { id: `col-${Date.now()}`, title: 'Новая колонка' }]);
+  };
+  const handleUpdateSwimlaneTitle = (id: string, title: string) => {
+    setKanbanSwimlanes(kanbanSwimlanes.map(s => s.id === id ? { ...s, title } : s));
+  };
+  const handleAddSwimlane = () => {
+    setKanbanSwimlanes([...kanbanSwimlanes, { id: `swim-${Date.now()}`, title: 'Новая дорожка' }]);
+  };
+
 
   const handleToggleChatWidget = () => {
     setIsChatWidgetOpen(prev => !prev);
@@ -327,11 +400,16 @@ const App: React.FC = () => {
       case Tab.Tasks:
         return <TasksDashboard
                   tasks={tasks}
-                  onAddTask={() => handleOpenTaskModal(null)}
-                  onEditTask={handleOpenTaskModal}
+                  columns={kanbanColumns}
+                  swimlanes={kanbanSwimlanes}
+                  onAddTask={handleOpenTaskModal}
+                  onEditTask={(task) => handleOpenTaskModal(task, null)}
                   onDeleteTask={handleDeleteTask}
-                  onPriorityChange={handleTaskPriorityChange}
-                  onToggleComplete={handleToggleTaskComplete}
+                  onMoveTask={handleMoveTask}
+                  onUpdateColumnTitle={handleUpdateColumnTitle}
+                  onAddColumn={handleAddColumn}
+                  onUpdateSwimlaneTitle={handleUpdateSwimlaneTitle}
+                  onAddSwimlane={handleAddSwimlane}
                 />;
       case Tab.Interviews:
          return <InterviewAnalyzer activeVacancy={activeVacancy} />;
@@ -356,7 +434,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="text-gray-800 min-h-full flex flex-col">
+    <div className="text-gray-800 min-h-screen flex flex-col">
       <style>{`
         @keyframes fade-in-up {
             from { opacity: 0; transform: translateY(20px); }
@@ -382,13 +460,43 @@ const App: React.FC = () => {
             onSelectVacancy={setActiveVacancyId}
           />
         )}
-      <main className="flex-1 w-full max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex">
-        <div className={`bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col ${!IS_EXTENSION && 'min-h-[600px]'}`}>
-           <div key={activeTab} className="animate-fade-in-up w-full h-full">
-            {renderContent()}
-          </div>
-        </div>
-      </main>
+
+      <div className="flex-1 flex w-full max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-hidden gap-x-6">
+          <main className="flex-1 flex flex-col min-w-0">
+            <div className={`bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col ${!IS_EXTENSION && 'min-h-[600px]'}`}>
+              <div key={activeTab} className="animate-fade-in-up w-full h-full">
+                {renderContent()}
+              </div>
+            </div>
+          </main>
+
+          {!IS_EXTENSION && (
+            <aside
+              className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
+                isChatWidgetOpen ? 'w-[400px]' : 'w-0'
+              }`}
+            >
+              <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col overflow-hidden">
+                {isChatWidgetOpen && (
+                  <>
+                    <header className="flex items-center justify-between p-4 border-b border-white/30 flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <BotMessageSquare className="w-6 h-6 text-slate-800" />
+                        <h3 className="font-bold text-slate-800">Мэтью Ассистент</h3>
+                      </div>
+                      <button onClick={handleToggleChatWidget} className="text-slate-600 hover:text-slate-900">
+                        <X className="w-6 h-6" />
+                      </button>
+                    </header>
+                    <div className="flex-grow overflow-hidden bg-transparent">
+                      <RecruiterChatWidget vacancies={vacancies} />
+                    </div>
+                  </>
+                )}
+              </div>
+            </aside>
+          )}
+      </div>
       
       {isProfileModalOpen && user && (
         <ProfileModal
@@ -424,39 +532,16 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* CHAT WIDGET for web-app version */}
+      {/* CHAT FAB for web-app version */}
       {!IS_EXTENSION && (
-        <div className="fixed inset-0 pointer-events-none">
-          {/* FAB */}
-          <div className={`fixed bottom-5 right-5 z-40 transition-transform duration-300 ease-in-out ${isChatWidgetOpen ? 'translate-y-24 opacity-0' : 'translate-y-0 opacity-100'}`}>
+        <div className={`fixed bottom-5 right-5 z-40 transition-transform duration-300 ease-in-out ${isChatWidgetOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
             <button
               onClick={handleToggleChatWidget}
-              className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 animate-pulse-slow pointer-events-auto"
+              className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 animate-pulse-slow"
               aria-label="Открыть чат с ассистентом"
             >
               <ChatBubble className="w-8 h-8 text-white" />
             </button>
-          </div>
-
-          {/* Widget Window */}
-          <div
-            className={`fixed bottom-5 right-5 z-40 w-[calc(100%-2.5rem)] max-w-sm h-[70vh] max-h-[600px] bg-white/50 backdrop-blur-2xl border border-white/30 rounded-2xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
-              isChatWidgetOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-16 pointer-events-none'
-            }`}
-          >
-            <header className="flex items-center justify-between p-4 border-b border-white/30 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <BotMessageSquare className="w-6 h-6 text-slate-800" />
-                <h3 className="font-bold text-slate-800">Мэтью Ассистент</h3>
-              </div>
-              <button onClick={handleToggleChatWidget} className="text-slate-600 hover:text-slate-900">
-                <X className="w-6 h-6" />
-              </button>
-            </header>
-            <div className="flex-grow overflow-hidden bg-transparent">
-              <RecruiterChatWidget vacancies={vacancies} />
-            </div>
-          </div>
         </div>
       )}
     </div>

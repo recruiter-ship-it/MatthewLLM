@@ -6,29 +6,29 @@ import { X } from './icons/Icons';
 interface TaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (task: Omit<Task, 'id' | 'isCompleted'> & { id?: string }) => void;
+  onSave: (task: Omit<Task, 'id' | 'columnId' | 'swimlaneId'> & { id?: string }) => void;
   task: Task | null;
 }
 
 const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, task }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<Priority>(Priority.Medium);
   const [dueDate, setDueDate] = useState('');
+  const [priority, setPriority] = useState<Priority>(Priority.Medium);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (task) {
       setTitle(task.title);
       setDescription(task.description);
-      setPriority(task.priority || Priority.Medium);
       setDueDate(task.dueDate?.split('T')[0] || '');
+      setPriority(task.priority || Priority.Medium);
     } else {
       // Reset form for new task
       setTitle('');
       setDescription('');
-      setPriority(Priority.Medium);
       setDueDate('');
+      setPriority(Priority.Medium);
     }
     setError('');
   }, [task, isOpen]);
@@ -42,8 +42,8 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, task }) 
       id: task?.id,
       title,
       description,
-      priority,
       dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+      priority,
     });
   };
 
@@ -71,15 +71,6 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, task }) 
           </div>
 
           <div>
-            <label htmlFor="description-task" className="block text-sm font-medium text-gray-300 mb-1">Описание</label>
-            <textarea
-              id="description-task" value={description} onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              className="w-full bg-white/10 border border-white/30 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-
-          <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">Приоритет *</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {Object.values(Priority).map(p => (
@@ -94,6 +85,15 @@ const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, onSave, task }) 
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="description-task" className="block text-sm font-medium text-gray-300 mb-1">Описание</label>
+            <textarea
+              id="description-task" value={description} onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              className="w-full bg-white/10 border border-white/30 rounded-lg px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
           </div>
           
            <div>
