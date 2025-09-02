@@ -14,7 +14,7 @@ import MSourcer from './components/MSourcer';
 import RecruiterChatWidget from './components/RecruiterChatWidget';
 import TasksDashboard from './components/TasksDashboard';
 import TaskModal from './components/TaskModal';
-import { ChatBubble, X, BotMessageSquare } from './components/icons/Icons';
+import { X, AiChat } from './components/icons/Icons';
 
 declare global {
     interface Window {
@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
   const [kanbanSwimlanes, setKanbanSwimlanes] = useState<KanbanSwimlane[]>([]);
+  const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<string[]>([]);
   const [registeredUsers, setRegisteredUsers] = useState<StoredUser[]>([]);
   const [isVacancyModalOpen, setIsVacancyModalOpen] = useState(false);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
@@ -65,9 +66,10 @@ const App: React.FC = () => {
       let savedActiveVacancyId: string | null = null;
       let savedColumns: KanbanColumn[] = [];
       let savedSwimlanes: KanbanSwimlane[] = [];
+      let savedCollapsedSwimlanes: string[] = [];
 
       if (IS_EXTENSION) {
-        const data = await window.chrome.storage.local.get(['user', 'vacancies', 'tasks', 'registeredUsers', 'activeVacancyId', 'kanbanColumns', 'kanbanSwimlanes']);
+        const data = await window.chrome.storage.local.get(['user', 'vacancies', 'tasks', 'registeredUsers', 'activeVacancyId', 'kanbanColumns', 'kanbanSwimlanes', 'collapsedSwimlanes']);
         savedUser = data.user || null;
         savedVacancies = data.vacancies || [];
         savedTasks = data.tasks || [];
@@ -75,6 +77,7 @@ const App: React.FC = () => {
         savedActiveVacancyId = data.activeVacancyId || null;
         savedColumns = data.kanbanColumns || [];
         savedSwimlanes = data.kanbanSwimlanes || [];
+        savedCollapsedSwimlanes = data.collapsedSwimlanes || [];
       } else {
         try {
           const userStr = localStorage.getItem('user');
@@ -90,6 +93,8 @@ const App: React.FC = () => {
           if (columnsStr) savedColumns = JSON.parse(columnsStr);
           const swimlanesStr = localStorage.getItem('kanbanSwimlanes');
           if (swimlanesStr) savedSwimlanes = JSON.parse(swimlanesStr);
+          const collapsedStr = localStorage.getItem('collapsedSwimlanes');
+          if (collapsedStr) savedCollapsedSwimlanes = JSON.parse(collapsedStr);
         } catch (error) {
           console.error("Could not parse data from localStorage", error);
         }
@@ -102,6 +107,7 @@ const App: React.FC = () => {
       setVacancies(savedVacancies);
       setRegisteredUsers(savedRegisteredUsers);
       setActiveVacancyId(savedActiveVacancyId);
+      setCollapsedSwimlanes(savedCollapsedSwimlanes);
 
       // --- Kanban Board Setup & Migration ---
       const defaultColumns = [
@@ -154,6 +160,7 @@ const App: React.FC = () => {
         activeVacancyId,
         kanbanColumns,
         kanbanSwimlanes,
+        collapsedSwimlanes,
     };
     
     if (IS_EXTENSION) {
@@ -167,7 +174,7 @@ const App: React.FC = () => {
           }
       }
     }
-  }, [vacancies, tasks, registeredUsers, activeVacancyId, kanbanColumns, kanbanSwimlanes, isLoadingStorage]);
+  }, [vacancies, tasks, registeredUsers, activeVacancyId, kanbanColumns, kanbanSwimlanes, collapsedSwimlanes, isLoadingStorage]);
 
   const persistUser = (appUser: User | null) => {
     if (IS_EXTENSION) {
@@ -359,8 +366,33 @@ const App: React.FC = () => {
     setTasks(tasks.filter(t => t.id !== id));
   };
 
-  const handleMoveTask = (taskId: string, newColumnId: string, newSwimlaneId: string) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, columnId: newColumnId, swimlaneId: newSwimlaneId } : t));
+  const handleMoveTask = (taskId: string, newColumnId: string, newSwimlaneId: string, beforeTaskId: string | null) => {
+    setTasks(prevTasks => {
+        const taskToMove = prevTasks.find(t => t.id === taskId);
+        if (!taskToMove) return prevTasks;
+
+        const tasksWithoutMoved = prevTasks.filter(t => t.id !== taskId);
+        
+        const updatedTask = { ...taskToMove, columnId: newColumnId, swimlaneId: newSwimlaneId };
+
+        if (beforeTaskId === null) {
+             return [...tasksWithoutMoved, updatedTask];
+        }
+
+        const insertAtIndex = tasksWithoutMoved.findIndex(t => t.id === beforeTaskId);
+        
+        if (insertAtIndex === -1) {
+             return [...tasksWithoutMoved, updatedTask];
+        }
+
+        const newTasks = [
+            ...tasksWithoutMoved.slice(0, insertAtIndex),
+            updatedTask,
+            ...tasksWithoutMoved.slice(insertAtIndex)
+        ];
+        
+        return newTasks;
+    });
   };
 
   const handleUpdateColumnTitle = (id: string, title: string) => {
@@ -374,6 +406,13 @@ const App: React.FC = () => {
   };
   const handleAddSwimlane = () => {
     setKanbanSwimlanes([...kanbanSwimlanes, { id: `swim-${Date.now()}`, title: 'Новая дорожка' }]);
+  };
+  const handleToggleSwimlane = (swimlaneId: string) => {
+    setCollapsedSwimlanes(prev => 
+        prev.includes(swimlaneId) 
+            ? prev.filter(id => id !== swimlaneId)
+            : [...prev, swimlaneId]
+    );
   };
 
 
@@ -402,6 +441,7 @@ const App: React.FC = () => {
                   tasks={tasks}
                   columns={kanbanColumns}
                   swimlanes={kanbanSwimlanes}
+                  collapsedSwimlanes={collapsedSwimlanes}
                   onAddTask={handleOpenTaskModal}
                   onEditTask={(task) => handleOpenTaskModal(task, null)}
                   onDeleteTask={handleDeleteTask}
@@ -410,6 +450,7 @@ const App: React.FC = () => {
                   onAddColumn={handleAddColumn}
                   onUpdateSwimlaneTitle={handleUpdateSwimlaneTitle}
                   onAddSwimlane={handleAddSwimlane}
+                  onToggleSwimlane={handleToggleSwimlane}
                 />;
       case Tab.Interviews:
          return <InterviewAnalyzer activeVacancy={activeVacancy} />;
@@ -436,10 +477,12 @@ const App: React.FC = () => {
   return (
     <div className="text-gray-800 min-h-screen flex flex-col">
       <style>{`
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes fade-in-up {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         .animate-fade-in-up { animation: fade-in-up 0.5s ease-out forwards; }
         @keyframes pulse-slow {
           50% { transform: scale(1.05); }
@@ -461,7 +504,7 @@ const App: React.FC = () => {
           />
         )}
 
-      <div className="flex-1 flex w-full max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-hidden gap-x-6">
+      <div className="flex-1 flex w-full max-w-full mx-auto px-2 sm:px-6 lg:px-8 py-6 sm:py-8 overflow-hidden gap-x-6">
           <main className="flex-1 flex flex-col min-w-0">
             <div className={`bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col ${!IS_EXTENSION && 'min-h-[600px]'}`}>
               <div key={activeTab} className="animate-fade-in-up w-full h-full">
@@ -473,7 +516,7 @@ const App: React.FC = () => {
           {!IS_EXTENSION && (
             <aside
               className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
-                isChatWidgetOpen ? 'w-[400px]' : 'w-0'
+                isChatWidgetOpen ? 'w-full sm:w-[400px]' : 'w-0'
               }`}
             >
               <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col overflow-hidden">
@@ -481,14 +524,14 @@ const App: React.FC = () => {
                   <>
                     <header className="flex items-center justify-between p-4 border-b border-white/30 flex-shrink-0">
                       <div className="flex items-center gap-2">
-                        <BotMessageSquare className="w-6 h-6 text-slate-800" />
+                        <AiChat className="w-6 h-6 text-slate-800" />
                         <h3 className="font-bold text-slate-800">Мэтью Ассистент</h3>
                       </div>
                       <button onClick={handleToggleChatWidget} className="text-slate-600 hover:text-slate-900">
                         <X className="w-6 h-6" />
                       </button>
                     </header>
-                    <div className="flex-grow overflow-hidden bg-transparent">
+                    <div className="flex-grow overflow-hidden bg-transparent animate-fade-in">
                       <RecruiterChatWidget vacancies={vacancies} />
                     </div>
                   </>
@@ -537,10 +580,10 @@ const App: React.FC = () => {
         <div className={`fixed bottom-5 right-5 z-40 transition-transform duration-300 ease-in-out ${isChatWidgetOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
             <button
               onClick={handleToggleChatWidget}
-              className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 animate-pulse-slow"
+              className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 animate-pulse-slow"
               aria-label="Открыть чат с ассистентом"
             >
-              <ChatBubble className="w-8 h-8 text-white" />
+              <AiChat className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
             </button>
         </div>
       )}

@@ -1,8 +1,10 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Chat, GenerateContentResponse } from '@google/genai';
 import { ResponsiveContainer, PieChart, Pie, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell } from 'recharts';
 import { Vacancy } from '../types';
-import { BotMessageSquare, UserCircle, Send, Paperclip, X, Mic, Volume2, VolumeX } from './icons/Icons';
+import { AiChat, User, Send, Paperclip, X, Mic, Volume2, VolumeX } from './icons/Icons';
 
 declare global {
     interface Window {
@@ -102,6 +104,13 @@ const RecruiterChatWidget: React.FC<RecruiterChatWidgetProps> = ({ vacancies }) 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const promptStarters = [
+    "Какие вакансии сейчас горят?",
+    "Построй отчет по кандидатам",
+    "Напомни мои задачи на сегодня",
+    "Найди в интернете тренды рынка"
+  ];
+
   // Effect for setting up the chat instance
   useEffect(() => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -136,7 +145,7 @@ ${JSON.stringify(vacanciesSummary, null, 2)}
     setChat(newChat);
     setMessages([{
         role: 'model',
-        text: "Привет! Я Мэтью, ваш AI-ассистент. Чем могу помочь сегодня? Вы можете задать вопрос о вакансиях, попросить построить отчет или загрузить изображение для анализа.",
+        text: "Привет! Я Мэтью, ваш AI-ассистент. Чем могу помочь сегодня?",
     }]);
   }, [vacancies]);
 
@@ -266,21 +275,20 @@ ${JSON.stringify(vacanciesSummary, null, 2)}
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!userInput.trim() && !fileToUpload) return;
+  const handleSendMessage = async (messageText = userInput) => {
+    if (!messageText.trim() && !fileToUpload) return;
     if (isListening) {
         recognitionRef.current?.stop();
     }
 
     setIsLoading(true);
-    const userMessageText = userInput;
     const imagePreviewUrl = filePreview || undefined;
 
-    setMessages(prev => [...prev, { role: 'user', text: userMessageText, imagePreview: imagePreviewUrl }]);
+    setMessages(prev => [...prev, { role: 'user', text: messageText, imagePreview: imagePreviewUrl }]);
     setUserInput('');
     removeFile();
     
-    const parts: any[] = [{ text: userMessageText }];
+    const parts: any[] = [{ text: messageText }];
     if (fileToUpload) {
         try {
             const imagePart = await fileToGenerativePart(fileToUpload);
@@ -372,17 +380,22 @@ ${JSON.stringify(vacanciesSummary, null, 2)}
       handleSendMessage();
     }
   };
+  
+  const handlePromptClick = (prompt: string) => {
+    setUserInput(prompt);
+    handleSendMessage(prompt);
+  };
 
   return (
     <div className="flex flex-col h-full w-full bg-transparent">
       <div className="flex-grow p-4 overflow-y-auto space-y-4">
         {messages.map((msg, index) => (
-          <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-            {msg.role === 'model' && <BotMessageSquare className="w-8 h-8 text-slate-700 flex-shrink-0 mt-1" />}
-            <div className={`p-3 rounded-2xl max-w-xs md:max-w-md ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white/70 text-slate-800 rounded-bl-none'}`}>
+          <div key={index} className={`flex items-start gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>
+            {msg.role === 'model' && <AiChat className="w-8 h-8 text-slate-700 flex-shrink-0 mt-1" />}
+            <div className={`p-3 rounded-2xl max-w-xs md:max-w-md ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-lg' : 'bg-white/70 text-slate-800 rounded-bl-lg'}`}>
               {msg.imagePreview && <img src={msg.imagePreview} alt="upload preview" className="rounded-lg mb-2 max-h-40" />}
               {msg.chartData ? (
-                 <div className="w-80 h-64 my-2">
+                 <div className="w-full max-w-xs h-64 my-2">
                     <ChartComponent data={msg.chartData} />
                  </div>
               ) : (
@@ -409,12 +422,26 @@ ${JSON.stringify(vacanciesSummary, null, 2)}
                 </div>
               )}
             </div>
-            {msg.role === 'user' && <UserCircle className="w-8 h-8 text-slate-500 flex-shrink-0 mt-1" />}
+            {msg.role === 'user' && <User className="w-8 h-8 text-slate-500 flex-shrink-0 mt-1" />}
           </div>
         ))}
+         {/* Prompt Starters */}
+        {messages.length === 1 && !isLoading && (
+            <div className="flex flex-wrap gap-2 justify-center pt-4 animate-fade-in-up">
+                {promptStarters.map(prompt => (
+                    <button 
+                        key={prompt}
+                        onClick={() => handlePromptClick(prompt)}
+                        className="px-3 py-1.5 bg-white/60 text-blue-800 text-sm font-medium rounded-full hover:bg-white/90 transition-colors"
+                    >
+                        {prompt}
+                    </button>
+                ))}
+            </div>
+        )}
         {isLoading && (
-            <div className="flex items-start gap-3">
-                <BotMessageSquare className="w-8 h-8 text-slate-700 flex-shrink-0 mt-1" />
+            <div className="flex items-start gap-2.5 animate-fade-in-up">
+                <AiChat className="w-8 h-8 text-slate-700 flex-shrink-0 mt-1" />
                 <div className="p-3 rounded-2xl bg-white/70">
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 bg-slate-500 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
@@ -467,7 +494,7 @@ ${JSON.stringify(vacanciesSummary, null, 2)}
             <Mic className="w-5 h-5"/>
         </button>
           <button
-            onClick={handleSendMessage}
+            onClick={() => handleSendMessage()}
             disabled={isLoading || (!userInput.trim() && !fileToUpload)}
             className="p-2 bg-blue-600 text-white rounded-full disabled:bg-blue-400 hover:bg-blue-700 transition-colors flex-shrink-0"
           >

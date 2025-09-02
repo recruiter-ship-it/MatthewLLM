@@ -1,12 +1,12 @@
 
 import React, { useRef } from 'react';
-import { User } from '../types';
-import { X, UserCircle as UserIcon, Camera } from './icons/Icons';
+import { User as UserType } from '../types';
+import { X, User, Camera } from './icons/Icons';
 
 interface ProfileModalProps {
-  user: User;
+  user: UserType;
   onClose: () => void;
-  onUpdateUser: (updatedUserInfo: Partial<User>) => void;
+  onUpdateUser: (updatedUserInfo: Partial<UserType>) => void;
 }
 
 const ProfileModal: React.FC<ProfileModalProps> = ({ user, onClose, onUpdateUser }) => {
@@ -72,7 +72,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ user, onClose, onUpdateUser
 
         <div className="space-y-4">
           <div className="flex items-center gap-3 p-3 bg-white/10 rounded-lg">
-             <UserIcon className="w-5 h-5 text-gray-300"/>
+             <User className="w-5 h-5 text-gray-300"/>
              <span className="text-gray-200">ID: {user.id}</span>
           </div>
         </div>

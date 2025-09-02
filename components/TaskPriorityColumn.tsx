@@ -50,6 +50,16 @@ const TaskPriorityColumn: React.FC<TaskPriorityColumnProps> = ({
 
   const config = priorityConfig[priority];
 
+  // Fix: Added drag handlers to pass to TaskCard
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, taskId: string) => {
+    e.dataTransfer.setData('taskId', taskId);
+    e.currentTarget.classList.add('opacity-50', 'scale-95');
+  };
+
+  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
+    e.currentTarget.classList.remove('opacity-50', 'scale-95');
+  };
+
   return (
     <div 
       onDragOver={handleDragOver}
@@ -73,6 +83,8 @@ const TaskPriorityColumn: React.FC<TaskPriorityColumnProps> = ({
             isDone={false}
             onEdit={() => onEditTask(task)}
             onDelete={() => onDeleteTask(task.id)}
+            onDragStart={(e) => handleDragStart(e, task.id)}
+            onDragEnd={handleDragEnd}
           />
         ))}
         {tasks.length === 0 && (

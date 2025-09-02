@@ -30,11 +30,10 @@ export const Users: React.FC<IconProps> = (props) => (
   </svg>
 );
 
-export const UserCircle: React.FC<IconProps> = (props) => (
+export const User: React.FC<IconProps> = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-    <path d="M5.52 19c.64-2.2 1.84-4 3.22-5.26C10.07 12.49 11.01 12 12 12s1.93.49 3.26 1.74c1.38 1.26 2.58 3.06 3.22 5.26" />
-    <circle cx="12" cy="12" r="10" />
-    <circle cx="12" cy="10" r="3" />
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+    <circle cx="12" cy="7" r="4"></circle>
   </svg>
 );
 
@@ -180,16 +179,12 @@ export const Clock: React.FC<IconProps> = (props) => (
     </svg>
 );
 
-export const BotMessageSquare: React.FC<IconProps> = (props) => (
+export const AiChat: React.FC<IconProps> = (props) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-        <path d="M12 6V4H8" />
-        <path d="M16 4h-4" />
-        <path d="M12 14v-4" />
-        <path d="M16 14h-4" />
-        <path d="M21 15a2 2 0 0 0-2-2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="M9.5 7.5l1-1" />
+        <path d="M14.5 7.5l-1-1" />
         <path d="M12 10V8" />
-        <path d="M8 10H6" />
-        <path d="M16 10h2" />
     </svg>
 );
 
@@ -250,12 +245,6 @@ export const Search: React.FC<IconProps> = (props) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
         <circle cx="11" cy="11" r="8"></circle>
         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-    </svg>
-);
-
-export const ChatBubble: React.FC<IconProps> = (props) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
     </svg>
 );
 

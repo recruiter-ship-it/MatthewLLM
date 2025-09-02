@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Task, Priority } from '../types';
 import { MoreVertical, Edit, Trash2, Calendar } from './icons/Icons';
@@ -43,7 +44,9 @@ const TaskCard: React.FC<{
   isDone: boolean;
   onEdit: () => void;
   onDelete: () => void;
-}> = ({ task, isDone, onEdit, onDelete }) => {
+  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd: (e: React.DragEvent<HTMLDivElement>) => void;
+}> = ({ task, isDone, onEdit, onDelete, onDragStart, onDragEnd }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -56,48 +59,34 @@ const TaskCard: React.FC<{
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    e.dataTransfer.setData('taskId', task.id);
-    e.currentTarget.classList.add('opacity-50', 'scale-95', 'shadow-2xl');
-  };
-
-  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
-    e.currentTarget.classList.remove('opacity-50', 'scale-95', 'shadow-2xl');
-  };
   
   const cardBackground = useMemo(() => {
     if (isDone) {
-        return 'bg-slate-100/80 opacity-60';
+      return 'bg-slate-100/80 opacity-60';
     }
-    
+    if (task.priority === Priority.Urgent) {
+      return 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20';
+    }
+
     let background = 'bg-white/80 hover:shadow-md hover:bg-white';
     
-    if (task.priority === Priority.Urgent) {
-        return 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20';
-    }
-
     if (task.dueDate) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const dueDate = new Date(task.dueDate);
-        const diffTime = dueDate.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dueDate = new Date(task.dueDate);
+      const diffTime = dueDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        if (diffDays < 0) {
-            background = 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20';
-        } else if (diffDays === 0) {
-            background = 'bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20';
-        } else if (diffDays <= 3) {
-            if (task.priority !== Priority.High) {
-                background = 'bg-yellow-500/10 border-yellow-500/20 hover:bg-yellow-500/20';
-            }
-        }
+      if (diffDays < 0) { // Overdue
+        background = 'bg-red-500/10 border-red-500/20 hover:bg-red-500/20';
+      } else if (diffDays === 0) { // Due today
+        background = 'bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20';
+      } else if (diffDays <= 3) { // Due soon (1-3 days)
+        background = 'bg-yellow-500/10 border-yellow-500/20 hover:bg-yellow-500/20';
+      }
     }
     
     return background;
-
   }, [task.dueDate, task.priority, isDone]);
 
   const timelineData = useMemo(() => {
@@ -147,8 +136,9 @@ const TaskCard: React.FC<{
   return (
     <div
       draggable
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      data-task-id={task.id}
       className={`p-3 rounded-lg shadow-sm flex flex-col transition-all duration-300 border cursor-grab active:cursor-grabbing ${cardBackground}`}
     >
       <div className="flex items-start justify-between gap-2">

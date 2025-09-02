@@ -1,4 +1,3 @@
-
 import React, { useState, KeyboardEvent, useEffect, useRef } from 'react';
 
 interface EditableTitleProps {

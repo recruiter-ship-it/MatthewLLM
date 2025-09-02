@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Vacancy, AnalysisResult } from '../types';
-import { Sparkles, BotMessageSquare, ThumbsUp, ThumbsDown, HelpCircle, MailIcon, PhoneIcon, LinkedinIcon, Paperclip } from './icons/Icons';
+// FIX: Removed BotMessageSquare as it is not an exported member of './icons/Icons' and was not used in this component.
+import { Sparkles, ThumbsUp, ThumbsDown, HelpCircle, MailIcon, PhoneIcon, LinkedinIcon, Paperclip } from './icons/Icons';
 
 declare const chrome: any;
 

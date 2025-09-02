@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 import { Vacancy, CandidateResume, AnalysisResult } from '../types';
-import { X, BotMessageSquare, Clipboard, Users, FileIcon, Trash2, Sparkles, Plus, UploadCloud } from './icons/Icons';
+import { X, AiChat, Clipboard, Users, FileIcon, Trash2, Sparkles, Plus, UploadCloud } from './icons/Icons';
 import PdfViewer from './PdfViewer';
 import ResumeAnalysisModal from './ResumeAnalysisModal';
 
@@ -284,7 +285,7 @@ ${resumeText}
               onDragEnter={handleDragEnter}
             >
                 <div>
-                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><BotMessageSquare /> AI Ассистент</h3>
+                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><AiChat /> AI Ассистент</h3>
                   
                   {isLoadingAnalysis && (
                     <div className="flex items-center justify-center h-full">

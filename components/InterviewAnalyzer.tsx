@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 import { InterviewAnalysis, HiringManagerSummary, SoftSkill, Vacancy } from '../types';
-import { Sparkles, Star, Clipboard } from './icons/Icons';
+import { Sparkles, Star, Clipboard, Mic } from './icons/Icons';
 import { FileUpload } from './FileUpload';
+import LiveInterviewCopilot from './LiveInterviewCopilot';
 
 const fileToGenerativePart = async (file: File) => {
     const base64EncodedData = await new Promise<string>((resolve, reject) => {
@@ -47,17 +48,27 @@ interface InterviewAnalyzerProps {
 }
 
 const InterviewAnalyzer: React.FC<InterviewAnalyzerProps> = ({ activeVacancy }) => {
+  const [mode, setMode] = useState<'analyzer' | 'live'>('analyzer');
   const [interviewFile, setInterviewFile] = useState<File | null>(null);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [analysis, setAnalysis] = useState<InterviewAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSummaryCopied, setIsSummaryCopied] = useState(false);
+  const [shouldAnalyzeAfterLive, setShouldAnalyzeAfterLive] = useState(false);
 
   useEffect(() => {
     setAnalysis(null);
     setError(null);
   }, [interviewFile, resumeFile, activeVacancy]);
+
+  useEffect(() => {
+      if (shouldAnalyzeAfterLive && interviewFile && resumeFile && activeVacancy) {
+          handleAnalyze();
+          setShouldAnalyzeAfterLive(false);
+      }
+  }, [shouldAnalyzeAfterLive, interviewFile, resumeFile, activeVacancy]);
+
 
   const handleCopySummary = (summary: HiringManagerSummary) => {
     const {
@@ -87,6 +98,18 @@ ${conclusion}
     navigator.clipboard.writeText(summaryText.trim());
     setIsSummaryCopied(true);
     setTimeout(() => setIsSummaryCopied(false), 2000);
+  };
+  
+  const handleLiveInterviewComplete = (
+    recordedInterviewFile: File,
+    conductedWithResumeFile: File | null
+  ) => {
+      setInterviewFile(recordedInterviewFile);
+      if (conductedWithResumeFile) {
+        setResumeFile(conductedWithResumeFile);
+      }
+      setMode('analyzer');
+      setShouldAnalyzeAfterLive(true);
   };
 
 
@@ -259,14 +282,39 @@ ${resumeText}
     </div>
   );
 
+  if (mode === 'live') {
+      return (
+          <LiveInterviewCopilot
+            activeVacancy={activeVacancy}
+            onInterviewComplete={handleLiveInterviewComplete}
+            onCancel={() => setMode('analyzer')}
+          />
+      )
+  }
 
   return (
     <div className="p-4 sm:p-8 h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-slate-800">Анализатор Интервью</h2>
-            <p className="mt-2 text-slate-600 max-w-3xl mx-auto">Загрузите резюме и аудио/видеозапись собеседования, чтобы получить подробную сводку и анализ soft skills.</p>
+            <p className="mt-2 text-slate-600 max-w-3xl mx-auto">Загрузите запись для анализа или начните live-собеседование с AI-ассистентом.</p>
         </div>
+
+        <div className="text-center mb-8">
+            <button 
+                onClick={() => setMode('live')}
+                className="inline-flex items-center justify-center gap-3 px-6 py-3 bg-white/50 text-slate-800 font-bold rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-lg border border-white/40 disabled:opacity-50"
+                disabled={!activeVacancy}
+            >
+                <Mic className="w-6 h-6 text-blue-600"/>
+                Начать Live-Интервью с ассистентом
+            </button>
+        </div>
+
+        <div className="relative flex items-center justify-center my-8">
+          <span className="absolute left-0 w-full h-px bg-slate-300"></span>
+          <span className="relative bg-indigo-50 px-4 text-sm font-medium text-slate-500 z-10">Или загрузите существующую запись</span>
+      </div>
         
         {activeVacancy ? (
           <div className="max-w-3xl mx-auto mb-6 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-center text-sm">

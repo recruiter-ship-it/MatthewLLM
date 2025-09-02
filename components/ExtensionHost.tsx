@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { Vacancy } from '../types';
 import RecruiterChatWidget from './RecruiterChatWidget';
 import PageAnalyzer from './PageAnalyzer';
-import { ChatBubble, X, BotMessageSquare } from './icons/Icons';
+import { X, AiChat } from './icons/Icons';
 
 declare const chrome: any;
 
@@ -81,7 +82,7 @@ const ExtensionHost: React.FC = () => {
       >
         <header className="flex items-center justify-between p-4 border-b border-white/30 flex-shrink-0 bg-white/20">
           <div className="flex items-center gap-2">
-            <BotMessageSquare className="w-6 h-6 text-slate-800" />
+            <AiChat className="w-6 h-6 text-slate-800" />
             <h3 className="font-bold text-slate-800">Мэтью Ассистент</h3>
           </div>
           <button onClick={handleToggleWidget} className="text-slate-600 hover:text-slate-900">

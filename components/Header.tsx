@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { User, Tab, Vacancy } from '../types';
-import { UserCircle, LogOut, Menu, X, Briefcase, ChevronDown } from './icons/Icons';
+import { User as UserType, Tab, Vacancy } from '../types';
+import { User, LogOut, Menu, X, Briefcase, ChevronDown } from './icons/Icons';
 
 interface HeaderProps {
-  user: User;
+  user: UserType;
   onLogout: () => void;
   onProfileClick: () => void;
   activeTab: Tab;
@@ -19,6 +19,7 @@ const Header: React.FC<HeaderProps> = ({ user, onLogout, onProfileClick, activeT
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [vacancyDropdownOpen, setVacancyDropdownOpen] = useState(false);
+  const [mobileVacancySelectorOpen, setMobileVacancySelectorOpen] = useState(false);
   
   const dropdownRef = useRef<HTMLDivElement>(null);
   const vacancyDropdownRef = useRef<HTMLDivElement>(null);
@@ -130,7 +131,7 @@ const Header: React.FC<HeaderProps> = ({ user, onLogout, onProfileClick, activeT
               {profileDropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white/60 backdrop-blur-xl border border-white/20 rounded-xl shadow-2xl overflow-hidden animate-fade-in-down">
                   <button onClick={handleProfileClick} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-blue-500/10 transition-colors">
-                    <UserCircle className="w-5 h-5" /> Профиль
+                    <User className="w-5 h-5" /> Профиль
                   </button>
                   <button onClick={handleLogoutClick} className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-blue-500/10 transition-colors">
                     <LogOut className="w-5 h-5" /> Выйти
@@ -153,19 +154,43 @@ const Header: React.FC<HeaderProps> = ({ user, onLogout, onProfileClick, activeT
 
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-white/20 bg-white/60 backdrop-blur-xl">
-          <div className="px-2 pt-3 pb-2">
-            <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Активная вакансия</h3>
-            <div className="mt-2 space-y-1">
-                <select 
-                  onChange={(e) => onSelectVacancy(e.target.value || null)} 
-                  value={activeVacancy?.id || ''}
-                  className="w-full block pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md bg-white/50"
+            <div className="px-2 pt-3 pb-2 relative">
+                <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Активная вакансия</h3>
+                <button 
+                    onClick={() => setMobileVacancySelectorOpen(!mobileVacancySelectorOpen)}
+                    className="mt-1 w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/50 hover:bg-white/70 rounded-lg transition-colors text-left"
                 >
-                  <option value="">-- Не выбрана --</option>
-                  {vacancies.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
-                </select>
+                    <span className="text-sm font-medium text-slate-700 truncate">
+                        {activeVacancy ? activeVacancy.title : 'Не выбрана'}
+                    </span>
+                    <ChevronDown className={`w-5 h-5 text-slate-600 transition-transform ${mobileVacancySelectorOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {mobileVacancySelectorOpen && (
+                    <div className="mt-1 bg-white/80 backdrop-blur-xl border border-white/20 rounded-xl shadow-lg overflow-hidden animate-fade-in-down">
+                       <div className="max-h-48 overflow-y-auto">
+                        {vacancies.length > 0 ? vacancies.map(v => (
+                            <button key={v.id} onClick={() => { onSelectVacancy(v.id); setMobileVacancySelectorOpen(false); }}
+                                className={`w-full text-left px-4 py-2 text-sm truncate transition-colors ${activeVacancy?.id === v.id ? 'bg-blue-500/20 text-blue-800 font-semibold' : 'text-gray-700 hover:bg-blue-500/10'}`}
+                            >
+                                {v.title}
+                            </button>
+                        )) : (
+                            <div className="px-4 py-3 text-sm text-gray-500">Нет доступных вакансий.</div>
+                        )}
+                       </div>
+                        {activeVacancy && (
+                            <div className="border-t border-white/30">
+                                <button onClick={() => { onSelectVacancy(null); setMobileVacancySelectorOpen(false); }}
+                                    className="w-full text-left flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-500/10 transition-colors"
+                                >
+                                    <X className="w-4 h-4" /> Сбросить выбор
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
-          </div>
+
           <nav className="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-white/20 mt-2">
             {tabs.map((tab) => (
               <button key={tab} onClick={() => handleTabClick(tab)}
