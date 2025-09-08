@@ -9,26 +9,37 @@ const formatDate = (dateString?: string) => {
 };
 
 const getDaysString = (days: number): string => {
-    if (days >= 0 && days < 1) return 'Осталось < 1 дня';
-    // Round for the text, so -0.4 days is still "Просрочено"
+    // Handle overdue cases
+    if (days < 0) {
+        const absDays = Math.round(Math.abs(days));
+        if (absDays === 0) return 'Просрочено'; // For cases like -0.4 days that round to 0
+
+        const lastDigit = absDays % 10;
+        const lastTwoDigits = absDays % 100;
+
+        let dayWord;
+        if (lastTwoDigits > 10 && lastTwoDigits < 20) dayWord = 'дней';
+        else if (lastDigit === 1) dayWord = 'день';
+        else if (lastDigit > 1 && lastDigit < 5) dayWord = 'дня';
+        else dayWord = 'дней';
+
+        return `Просрочено на ${absDays} ${dayWord}`;
+    }
+
+    // Handle upcoming cases
+    if (days >= 0 && days < 1) return 'Срок сегодня';
+    
     const d = Math.round(days);
-    if (d === 0) return 'Осталось < 1 дня';
-
-    const absDays = Math.abs(d);
-    const lastDigit = absDays % 10;
-    const lastTwoDigits = absDays % 100;
-
+    const lastDigit = d % 10;
+    const lastTwoDigits = d % 100;
+    
     let dayWord;
     if (lastTwoDigits > 10 && lastTwoDigits < 20) dayWord = 'дней';
     else if (lastDigit === 1) dayWord = 'день';
     else if (lastDigit > 1 && lastDigit < 5) dayWord = 'дня';
     else dayWord = 'дней';
 
-    if (d < 0) {
-        return `Просрочено на ${absDays} ${dayWord}`;
-    } else {
-        return `Осталось ${d} ${dayWord}`;
-    }
+    return `Осталось ${d} ${dayWord}`;
 };
 
 

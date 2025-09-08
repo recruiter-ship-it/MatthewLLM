@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GoogleGenAI, Chat } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 import { Vacancy } from '../types';
 import { Mic, Sparkles, ThumbsUp, HelpCircle } from './icons/Icons';
 import { FileUpload } from './FileUpload';
+import { generateContentWithFallback } from '../utils/gemini';
+
 
 declare global {
     interface Window {
@@ -65,11 +65,11 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
-    const insightChatRef = useRef<Chat | null>(null);
+    const insightSystemPromptRef = useRef<string>('');
     const fullTranscriptRef = useRef<string>('');
-    const insightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const insightTimeoutRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const insightsContainerRef = useRef<HTMLDivElement>(null);
-    const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+    const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     
     // Refs for Audio Visualizer
     const audioVisualizerRef = useRef<HTMLCanvasElement>(null);
@@ -83,6 +83,29 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
             insightsContainerRef.current.scrollTop = insightsContainerRef.current.scrollHeight;
         }
     }, [insights]);
+
+    const stopInterview = useCallback(() => {
+        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+        if (insightTimeoutRef.current) clearInterval(insightTimeoutRef.current);
+        if (recognitionRef.current) recognitionRef.current.stop();
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+            mediaRecorderRef.current.onstop = () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                const audioFile = new File([audioBlob], `interview-recording-${Date.now()}.webm`, { type: 'audio/webm' });
+                onInterviewComplete(audioFile, resumeFile);
+            };
+            mediaRecorderRef.current.stop();
+        }
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+            audioContextRef.current.close();
+        }
+        setInterviewState('processing');
+    }, [onInterviewComplete, resumeFile]);
 
     const setupRecognition = useCallback(() => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -117,11 +140,9 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
         };
         recognitionRef.current = recognition;
         return true;
-    }, []);
+    }, [stopInterview]);
     
     const getInsights = useCallback(async () => {
-        if (!insightChatRef.current) return;
-        
         const currentTranscript = transcript;
         const newChunk = currentTranscript.substring(fullTranscriptRef.current.length);
 
@@ -129,7 +150,14 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
         fullTranscriptRef.current = currentTranscript;
 
         try {
-            const response = await insightChatRef.current.sendMessage({ message: newChunk });
+            const response = await generateContentWithFallback({
+                 contents: newChunk,
+                 config: {
+                    systemInstruction: insightSystemPromptRef.current,
+                    temperature: 0.5,
+                    responseMimeType: 'application/json'
+                 }
+            });
             const text = response.text.replace(/```json\n?|\n?```/g, '').trim();
             if (text) {
                 const newInsight: Omit<Insight, 'id'> = JSON.parse(text);
@@ -210,19 +238,13 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
         mediaRecorderRef.current.ondataavailable = (event) => {
             audioChunksRef.current.push(event.data);
         };
-        mediaRecorderRef.current.onstop = () => {
-            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-            const audioFile = new File([audioBlob], `interview-recording-${Date.now()}.webm`, { type: 'audio/webm' });
-            onInterviewComplete(audioFile, resumeFile);
-        };
-
+        
         let resumeText = '';
         if(resumeFile) {
             resumeText = await extractTextFromPdf(resumeFile);
         }
-
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const insightPrompt = `Ты — AI-ассистент на собеседовании. Тебе будут присылать фрагменты расшифровки разговора. Твоя задача — кратко отреагировать на ПОСЛЕДНЮЮ реплику. Ответ ДОЛЖЕН БЫТЬ в формате JSON: {"type": "suggestion" | "match" | "flag", "content": "..."}.
+        
+        insightSystemPromptRef.current = `Ты — AI-ассистент на собеседовании. Тебе будут присылать фрагменты расшифровки разговора. Твоя задача — кратко отреагировать на ПОСЛЕДНЮЮ реплику. Ответ ДОЛЖЕН БЫТЬ в формате JSON: {"type": "suggestion" | "match" | "flag", "content": "..."}.
 - type: 'suggestion' - предложи открытый поведенческий вопрос, чтобы глубже раскрыть последнюю реплику кандидата (например, "Расскажите о проекте, где вы...").
 - type: 'match' - отметь совпадение навыка с вакансией.
 - type: 'flag' - отметь неясность или потенциальный риск.
@@ -230,32 +252,12 @@ const LiveInterviewCopilot: React.FC<LiveInterviewCopilotProps> = ({ activeVacan
 ${activeVacancy.briefText}
 ${resumeText ? `--- РЕЗЮМЕ КАНДИДАТА ---\n${resumeText}` : ''}`;
         
-        insightChatRef.current = ai.chats.create({ model: 'gemini-2.5-flash', config: { systemInstruction: insightPrompt, temperature: 0.5 } });
-
         recognitionRef.current.start();
         mediaRecorderRef.current.start();
         setInterviewState('recording');
         insightTimeoutRef.current = setInterval(getInsights, 8000);
         timerIntervalRef.current = setInterval(() => setElapsedTime(prev => prev + 1), 1000);
     };
-
-    const stopInterview = useCallback(() => {
-        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-        if (insightTimeoutRef.current) clearInterval(insightTimeoutRef.current);
-        if (recognitionRef.current) recognitionRef.current.stop();
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-            mediaRecorderRef.current.stop();
-        }
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
-            mediaStreamRef.current = null;
-        }
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-            audioContextRef.current.close();
-        }
-        setInterviewState('processing');
-    }, []);
 
     const getInsightIcon = (type: InsightType) => {
         const props = { className: "w-6 h-6 flex-shrink-0" };

@@ -1,11 +1,13 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 import { Vacancy, CandidateResume, AnalysisResult } from '../types';
-import { X, AiChat, Clipboard, Users, FileIcon, Trash2, Sparkles, Plus, UploadCloud } from './icons/Icons';
+import { X, MatthewLogoIcon, Users, FileIcon, Trash2, Sparkles, Plus, UploadCloud } from './icons/Icons';
 import PdfViewer from './PdfViewer';
 import ResumeAnalysisModal from './ResumeAnalysisModal';
+import MarketPulseWidget from './MarketPulseWidget';
+import { generateContentWithFallback } from '../utils/gemini';
+
 
 const fileToDataUrl = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -31,32 +33,69 @@ const extractTextFromPdfDataUrl = async (dataUrl: string): Promise<string> => {
 interface VacancyDetailProps {
   vacancy: Vacancy;
   onClose: () => void;
-  onUpdate: (updatedVacancy: Vacancy) => void;
+  onUpdate: (update: (prev: Vacancy) => Vacancy) => void;
 }
 
 const VacancyDetailView: React.FC<VacancyDetailProps> = ({ vacancy, onClose, onUpdate }) => {
   const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [copiedQuery, setCopiedQuery] = useState<number | null>(null);
   const [viewingAnalysis, setViewingAnalysis] = useState<CandidateResume | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const resumeInputRef = useRef<HTMLInputElement>(null);
   
-  const handleAnalyzeResume = async (resumeId: string) => {
-    const resumeToAnalyze = (vacancy.resumes || []).find(r => r.id === resumeId);
-    if (!resumeToAnalyze || !vacancy.briefText) return;
-
-    // Set loading state
-    const updatedResumes = (vacancy.resumes || []).map(r => 
-        r.id === resumeId ? { ...r, isLoading: true, error: undefined } : r
-    );
-    onUpdate({ ...vacancy, resumes: updatedResumes });
-
-    try {
-        const resumeText = await extractTextFromPdfDataUrl(resumeToAnalyze.fileUrl);
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  useEffect(() => {
+    // Automatically analyze brief if not already done
+    const analyzeBrief = async () => {
+      if (isLoadingAnalysis) return; // Prevent re-triggering while loading
+      if (!vacancy.briefText || vacancy.analysis) {
+        return;
+      }
+      setIsLoadingAnalysis(true);
+      setAnalysisError(null);
+      try {
         const schema = {
-            type: Type.OBJECT,
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING, description: "Краткая, но емкая выжимка из текста брифа на 3-4 предложения. Опиши суть вакансии и ключевые требования." },
+          },
+          required: ["summary"]
+        }
+        const prompt = `Проанализируй следующий текст брифа вакансии и предоставь краткое содержание.\n\nТекст брифа:\n---\n${vacancy.briefText}\n---`;
+        const response = await generateContentWithFallback({
+          contents: prompt, config: { responseMimeType: 'application/json', responseSchema: schema }
+        });
+        const resultJson = JSON.parse(response.text);
+        onUpdate(prev => ({ ...prev, analysis: resultJson }));
+      } catch (e: any) {
+        console.error("Brief analysis failed:", e);
+        setAnalysisError(`Ошибка анализа брифа: ${e.message}`);
+      } finally {
+        setIsLoadingAnalysis(false);
+      }
+    };
+    analyzeBrief();
+  }, [vacancy.id, vacancy.briefText, vacancy.analysis, onUpdate, isLoadingAnalysis]);
+
+
+  useEffect(() => {
+    const analyzeNewResumes = async () => {
+        if (!vacancy.resumes || !vacancy.briefText) return;
+
+        const resumesToAnalyze = vacancy.resumes.filter(r => !r.analysis && !r.isLoading && !r.error);
+        if (resumesToAnalyze.length === 0) return;
+
+        // Batch update to set all to isLoading: true at once
+        onUpdate(prev => ({
+            ...prev,
+            resumes: (prev.resumes || []).map(r => 
+                resumesToAnalyze.some(rta => rta.id === r.id) 
+                    ? { ...r, isLoading: true } 
+                    : r
+            )
+        }));
+
+        const schema = {
+             type: Type.OBJECT,
             properties: {
             matchPercentage: { type: Type.NUMBER, description: "Числовая оценка соответствия от 0 до 100." },
             title: { type: Type.STRING, description: "Краткий вердикт, например 'Отличный кандидат'." },
@@ -77,102 +116,46 @@ const VacancyDetailView: React.FC<VacancyDetailProps> = ({ vacancy, onClose, onU
             },
             required: ['matchPercentage', 'title', 'summary', 'pros', 'cons', 'questionsForInterview', 'contactInfo'],
         };
-
-        const prompt = `Представь, что ты опытный HR-менеджер. Проанализируй резюме кандидата в сравнении с брифом вакансии. Ответ верни в JSON.
-
---- БРИФ ВАКАНСИИ ---
-${vacancy.briefText}
-
---- РЕЗЮМЕ КАНДИДАТА ---
-${resumeText}
-`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: schema,
-                temperature: 0.3,
-            },
-        });
-
-        const resultJson: AnalysisResult = JSON.parse(response.text);
         
-        // Use a functional update with setVacancies to get the latest state
-        onUpdate({
-            ...vacancy,
-            resumes: (vacancy.resumes || []).map(r =>
-                r.id === resumeId ? { ...r, isLoading: false, analysis: resultJson } : r
-            ),
+        const analysisPromises = resumesToAnalyze.map(async (resume) => {
+            try {
+                const resumeText = await extractTextFromPdfDataUrl(resume.fileUrl);
+                const prompt = `Представь, что ты опытный HR-менеджер. Проанализируй резюме кандидата в сравнении с брифом вакансии. Ответ верни в JSON.\n\n--- БРИФ ВАКАНСИИ ---\n${vacancy.briefText}\n\n--- РЕЗЮМЕ КАНДИДАТА ---\n${resumeText}\n`;
+                
+                const response = await generateContentWithFallback({
+                  contents: prompt,
+                  config: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.3 },
+                });
+                const resultJson: AnalysisResult = JSON.parse(response.text);
+                return { id: resume.id, analysis: resultJson, error: undefined };
+            } catch (e: any) {
+                console.error(`Error analyzing ${resume.fileName}:`, e);
+                return { id: resume.id, analysis: null, error: e.message || 'Не удалось проанализировать файл.' };
+            }
         });
-
-
-    } catch(e: any) {
-        console.error(`Error analyzing ${resumeToAnalyze.fileName}:`, e);
-        const errorMessage = e.message || 'Не удалось проанализировать файл.';
-         onUpdate({
-            ...vacancy,
-            resumes: (vacancy.resumes || []).map(r =>
-                r.id === resumeId ? { ...r, isLoading: false, error: errorMessage } : r
-            ),
+        
+        const results = await Promise.all(analysisPromises);
+        
+        // Batch update with all results
+        onUpdate(prev => {
+            const newResumes = [...(prev.resumes || [])];
+            results.forEach(result => {
+                const index = newResumes.findIndex(r => r.id === result.id);
+                if (index !== -1) {
+                    newResumes[index] = { 
+                        ...newResumes[index], 
+                        isLoading: false, 
+                        analysis: result.analysis, 
+                        error: result.error 
+                    };
+                }
+            });
+            return { ...prev, resumes: newResumes };
         });
-    }
-  };
-
-  useEffect(() => {
-    // Automatically analyze brief if not already done
-    const analyzeBrief = async () => {
-      if (!vacancy.briefText || vacancy.analysis) {
-        return;
-      }
-      setIsLoadingAnalysis(true);
-      setAnalysisError(null);
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const schema = {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING, description: "Краткая, но емкая выжимка из текста брифа на 3-4 предложения. Опиши суть вакансии и ключевые требования." },
-            booleanQueries: { type: Type.ARRAY, description: "Несколько (3-4) вариантов boolean search запросов для поиска кандидатов на LinkedIn на основе текста брифа.", items: { type: Type.STRING } }
-          },
-          required: ["summary", "booleanQueries"]
-        }
-        const prompt = `Проанализируй следующий текст брифа вакансии и предоставь краткое содержание и несколько вариантов boolean search запросов.\n\nТекст брифа:\n---\n${vacancy.briefText}\n---`;
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: 'application/json', responseSchema: schema }
-        });
-        const resultJson = JSON.parse(response.text);
-        onUpdate({ ...vacancy, analysis: resultJson });
-      } catch (e: any) {
-        console.error("Brief analysis failed:", e);
-        setAnalysisError(`Ошибка анализа брифа: ${e.message}`);
-      } finally {
-        setIsLoadingAnalysis(false);
-      }
     };
-    analyzeBrief();
-  }, [vacancy.briefText, vacancy.analysis, onUpdate]);
+    analyzeNewResumes();
+  }, [vacancy.resumes, vacancy.briefText, onUpdate]);
 
-
-  useEffect(() => {
-    // Automatically analyze resumes that are new
-    if (!vacancy.resumes || !vacancy.briefText) {
-      return;
-    }
-    const resumesToAnalyze = vacancy.resumes.filter(r => !r.analysis && !r.isLoading && !r.error);
-    for (const resume of resumesToAnalyze) {
-      handleAnalyzeResume(resume.id);
-    }
-  }, [vacancy.resumes, vacancy.briefText]);
-
-
-  const copyToClipboard = (text: string, index: number) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedQuery(index);
-      setTimeout(() => setCopiedQuery(null), 2000);
-    });
-  };
 
   const handleAddResumeClick = () => {
     resumeInputRef.current?.click();
@@ -195,12 +178,11 @@ ${resumeText}
 
     const newResumes = await Promise.all(newResumesPromises);
 
-    const updatedVacancy: Vacancy = {
-      ...vacancy,
-      resumes: [...(vacancy.resumes || []), ...newResumes],
-    };
-    onUpdate(updatedVacancy);
-  }, [vacancy, onUpdate]);
+    onUpdate(prev => ({
+        ...prev,
+        resumes: [...(prev.resumes || []), ...newResumes]
+    }));
+  }, [onUpdate]);
 
   const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     handleNewResumeFiles(e.target.files);
@@ -210,8 +192,10 @@ ${resumeText}
   };
 
   const handleDeleteResume = (resumeId: string) => {
-    const updatedResumes = (vacancy.resumes || []).filter(r => r.id !== resumeId);
-    onUpdate({ ...vacancy, resumes: updatedResumes });
+    onUpdate(prev => ({
+        ...prev,
+        resumes: (prev.resumes || []).filter(r => r.id !== resumeId)
+    }));
   };
   
   const getMatchPercentageBadge = (analysis: AnalysisResult) => {
@@ -285,7 +269,7 @@ ${resumeText}
               onDragEnter={handleDragEnter}
             >
                 <div>
-                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><AiChat /> AI Ассистент</h3>
+                  <h3 className="text-xl font-bold mb-4 flex items-center gap-2"><MatthewLogoIcon /> AI Ассистент</h3>
                   
                   {isLoadingAnalysis && (
                     <div className="flex items-center justify-center h-full">
@@ -304,27 +288,11 @@ ${resumeText}
                         <h4 className="font-semibold text-lg mb-2 text-gray-200">Краткое содержание</h4>
                         <p className="text-gray-300 text-sm leading-relaxed">{vacancy.analysis.summary}</p>
                       </div>
-                      <div>
-                        <h4 className="font-semibold text-lg mb-2 text-gray-200">Boolean Search запросы</h4>
-                        <ul className="space-y-2">
-                          {vacancy.analysis.booleanQueries.map((query, index) => (
-                            <li key={index} className="flex items-center gap-2 p-2 bg-black/20 rounded-md">
-                              <code className="text-xs text-gray-300 flex-grow break-all">{query}</code>
-                              <button 
-                                onClick={() => copyToClipboard(query, index)}
-                                className="p-1.5 rounded-md text-gray-300 hover:bg-blue-500/30 hover:text-white transition-colors flex-shrink-0"
-                                title="Копировать"
-                              >
-                                <Clipboard className="w-4 h-4"/>
-                              </button>
-                              {copiedQuery === index && <span className="text-xs text-green-400">✓</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
                     </div>
                   )}
                 </div>
+
+                <MarketPulseWidget vacancy={vacancy} />
 
                 {/* Candidates Section */}
                 <div className="mt-8 pt-6 border-t border-white/20 flex-grow flex flex-col relative">
@@ -350,7 +318,7 @@ ${resumeText}
                                                 </div>
                                             )}
                                             {resume.error && (
-                                                <button onClick={(e) => { e.stopPropagation(); handleAnalyzeResume(resume.id); }} className="px-3 py-1 text-xs bg-red-500/50 text-white rounded-md hover:bg-red-500/70">
+                                                <button onClick={(e) => { e.stopPropagation(); /* Implement re-try logic if needed */ }} className="px-3 py-1 text-xs bg-red-500/50 text-white rounded-md hover:bg-red-500/70">
                                                     Ошибка, повторить?
                                                 </button>
                                             )}

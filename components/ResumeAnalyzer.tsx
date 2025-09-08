@@ -1,14 +1,139 @@
-
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
+// Fix: Added missing import for ResumeAnalysis
 import { ResumeAnalysis, AnalysisResult, Vacancy } from '../types';
-import { Sparkles, ThumbsUp, ThumbsDown, HelpCircle, MailIcon, PhoneIcon, LinkedinIcon, Paperclip, Briefcase } from './icons/Icons';
+import { Sparkles, ThumbsUp, ThumbsDown, HelpCircle, MailIcon, PhoneIcon, LinkedinIcon, Paperclip, Briefcase, AlertTriangle } from './icons/Icons';
 import { FileUpload } from './FileUpload';
+import { generateContentWithFallback } from '../utils/gemini';
+
 
 interface ResumeAnalyzerProps {
     activeVacancy: Vacancy | null;
 }
+
+const getApiErrorMessage = (error: any, defaultMessage: string): string => {
+    if (!error.message) return defaultMessage;
+    try {
+        // Error messages from the backend might be JSON strings.
+        const errorString = error.message;
+        const jsonMatch = errorString.match(/\{.*\}/);
+        if (!jsonMatch) throw new Error("Not a JSON error");
+        
+        const errorObj = JSON.parse(jsonMatch[0]);
+        const apiError = errorObj.error;
+        if (apiError) {
+            if (apiError.status === 'RESOURCE_EXHAUSTED' || apiError.code === 429) {
+                return "Вы превысили лимит запросов к AI. Пожалуйста, попробуйте снова через некоторое время.";
+            }
+            return `Ошибка AI: ${apiError.message}` || defaultMessage;
+        }
+    } catch (e) {
+        // Not a JSON error message, return as is. Could be network error etc.
+    }
+    return error.message;
+};
+
+const ResultCard: React.FC<{ result: ResumeAnalysis }> = ({ result }) => {
+  const { fileName, analysis, isLoading, error } = result;
+
+  const getProgressBarProps = (percentage: number) => {
+    let colorClass = 'bg-red-500';
+    if (percentage >= 70) { colorClass = 'bg-green-500'; }
+    else if (percentage >= 40) { colorClass = 'bg-yellow-500'; }
+    return { width: `${Math.max(0, Math.min(100, percentage))}%`, colorClass };
+  };
+  
+  const ContactLink: React.FC<{ icon: React.ReactNode, href?: string, text?: string }> = ({ icon, href, text }) => {
+    if (!text || !text.trim()) return null;
+    const isLink = href && href !== '#' && !href.startsWith('tel:') && !href.startsWith('mailto:');
+    const finalHref = href || '#';
+    const linkProps = isLink ? { href: finalHref, target: "_blank", rel: "noopener noreferrer" } : { href: finalHref };
+
+    return (
+        <a {...linkProps} className={`flex items-center gap-2 truncate ${href && href !== '#' ? 'hover:text-blue-600 dark:hover:text-blue-400 transition-colors' : 'cursor-default'}`}>
+            {icon}
+            <span className="truncate">{text}</span>
+        </a>
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <div className="p-4 bg-white/50 dark:bg-slate-700/50 rounded-lg shadow-sm animate-pulse flex items-center gap-3">
+        <div className="w-5 h-5 border-2 border-slate-400 dark:border-slate-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-700 dark:text-slate-300 font-medium truncate">{fileName}</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 bg-red-500/20 rounded-lg shadow-sm border border-red-500/30">
+        <p className="font-semibold text-red-800 dark:text-red-300 truncate">{fileName}</p>
+        <p className="text-sm text-red-700 dark:text-red-400 mt-1">{error}</p>
+      </div>
+    );
+  }
+  
+  if (!analysis) return null;
+
+  const progressBar = getProgressBarProps(analysis.matchPercentage);
+
+  return (
+    <details className="p-4 bg-white/60 dark:bg-slate-700/60 rounded-lg shadow-sm border border-white/50 dark:border-slate-600/50 transition-all open:ring-2 open:ring-blue-500" open>
+      <summary className="flex items-center justify-between cursor-pointer list-none">
+        <div className="flex-grow overflow-hidden pr-4">
+          <p className="font-semibold text-slate-800 dark:text-slate-200 truncate" title={fileName}>{fileName}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">{analysis.title}</p>
+        </div>
+        <div className={`text-lg font-bold ${progressBar.colorClass.replace('bg-', 'text-')}`}>{analysis.matchPercentage}%</div>
+      </summary>
+      <div className="mt-4 pt-4 border-t border-slate-300/50 dark:border-slate-600/50 space-y-4">
+        <div className="w-full bg-slate-200/50 dark:bg-slate-600/50 rounded-full h-2">
+            <div className={`h-2 rounded-full ${progressBar.colorClass}`} style={{ width: progressBar.width }}></div>
+        </div>
+
+        <p className="text-sm text-slate-700 dark:text-slate-300">{analysis.summary}</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div className="space-y-1">
+                <h5 className="font-semibold flex items-center gap-2"><ThumbsUp className="w-4 h-4 text-green-600"/> Плюсы</h5>
+                <ul className="list-disc list-inside text-slate-600 dark:text-slate-400">{analysis.pros.map((s, i) => <li key={i}>{s}</li>)}</ul>
+            </div>
+            <div className="space-y-1">
+                <h5 className="font-semibold flex items-center gap-2"><ThumbsDown className="w-4 h-4 text-red-600"/> Минусы</h5>
+                <ul className="list-disc list-inside text-slate-600 dark:text-slate-400">{analysis.cons.map((w, i) => <li key={i}>{w}</li>)}</ul>
+            </div>
+        </div>
+        {analysis.redFlags && analysis.redFlags.length > 0 && (
+            <div className="space-y-1 text-sm">
+                <h5 className="font-semibold flex items-center gap-2 text-orange-700 dark:text-orange-400"><AlertTriangle className="w-4 h-4"/> Красные флаги</h5>
+                <ul className="list-disc list-inside text-slate-600 dark:text-slate-400">{analysis.redFlags.map((flag, i) => <li key={i}>{flag}</li>)}</ul>
+            </div>
+        )}
+        <div className="space-y-1">
+            <h5 className="font-semibold flex items-center gap-2"><HelpCircle className="w-4 h-4 text-blue-600"/> Вопросы для интервью</h5>
+            <ul className="list-disc list-inside text-slate-600 dark:text-slate-400 text-sm">{analysis.questionsForInterview.map((q, i) => <li key={i}>{q}</li>)}</ul>
+        </div>
+        
+        {analysis.contactInfo && (
+            <div className="space-y-2 pt-2 border-t border-slate-300/50 dark:border-slate-600/50 text-sm">
+                 <h5 className="font-semibold flex items-center gap-2"><Paperclip className="w-4 h-4 text-slate-600 dark:text-slate-400"/> Контакты</h5>
+                 <div className="flex flex-col gap-1 text-slate-600 dark:text-slate-400">
+                    <ContactLink icon={<MailIcon className="w-4 h-4" />} href={`mailto:${analysis.contactInfo.email}`} text={analysis.contactInfo.email} />
+                    <ContactLink icon={<PhoneIcon className="w-4 h-4" />} href={`tel:${analysis.contactInfo.phone}`} text={analysis.contactInfo.phone} />
+                    <ContactLink icon={<LinkedinIcon className="w-4 h-4" />} href={analysis.contactInfo.linkedin} text={analysis.contactInfo.linkedin} />
+                    <ContactLink icon={<Briefcase className="w-4 h-4" />} text={analysis.contactInfo.other} />
+                 </div>
+            </div>
+        )}
+
+      </div>
+    </details>
+  );
+};
+
 
 const ResumeAnalyzer: React.FC<ResumeAnalyzerProps> = ({ activeVacancy }) => {
   const [resumeFiles, setResumeFiles] = useState<File[]>([]);
@@ -50,7 +175,6 @@ const ResumeAnalyzer: React.FC<ResumeAnalyzerProps> = ({ activeVacancy }) => {
 
     try {
       const jobDescription = activeVacancy.briefText;
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const schema = {
         type: Type.OBJECT,
         properties: {
@@ -59,6 +183,7 @@ const ResumeAnalyzer: React.FC<ResumeAnalyzerProps> = ({ activeVacancy }) => {
           summary: { type: Type.STRING, description: 'Развернутое резюме анализа на 3-4 предложения.' },
           pros: { type: Type.ARRAY, description: 'Список сильных сторон кандидата.', items: { type: Type.STRING } },
           cons: { type: Type.ARRAY, description: 'Список слабых сторон или рисков.', items: { type: Type.STRING } },
+          redFlags: { type: Type.ARRAY, description: 'Список потенциальных "красных флагов": частая смена работы, большие пробелы в карьере, несоответствия и т.д.', items: { type: Type.STRING } },
           questionsForInterview: { type: Type.ARRAY, description: 'Список вопросов для собеседования.', items: { type: Type.STRING } },
           contactInfo: {
             type: Type.OBJECT,
@@ -74,8 +199,7 @@ const ResumeAnalyzer: React.FC<ResumeAnalyzerProps> = ({ activeVacancy }) => {
         required: ['matchPercentage', 'title', 'summary', 'pros', 'cons', 'questionsForInterview', 'contactInfo'],
       };
 
-      for (let i = 0; i < resumeFiles.length; i++) {
-        const file = resumeFiles[i];
+      for (const [i, file] of resumeFiles.entries()) {
         try {
           const resumeText = await extractTextFromPdf(file);
           const prompt = `Представь, что ты опытный HR-менеджер. Твоя задача — провести глубокий и объективный анализ резюме кандидата в сравнении с предоставленным брифом вакансии.
@@ -86,20 +210,20 @@ const ResumeAnalyzer: React.FC<ResumeAnalyzerProps> = ({ activeVacancy }) => {
 3.  **summary:** Напиши человекочитаемое и развернутое резюме на 3-4 предложения. Объясни свою оценку, укажи на ключевые совпадения и расхождения.
 4.  **pros:** Перечисли списком ключевые сильные стороны кандидата, которые напрямую соответствуют требованиям вакансии.
 5.  **cons:** Перечисли списком потенциальные риски, недостающие навыки или опыт. Будь конструктивен.
-6.  **questionsForInterview:** Предложи 3-4 умных вопроса для собеседования, которые помогут прояснить "минусы" или глубже раскрыть "плюсы".
-7.  **contactInfo:** Найди и извлеки контактную информацию из резюме: email, номер телефона, полную ссылку на LinkedIn (URL) и любую другую (например, личный сайт, Telegram). Если какая-то информация отсутствует, оставь соответствующее поле пустым в JSON.
+6.  **redFlags:** Отдельно выдели потенциальные "красные флаги", такие как частая смена работы (job hopping), необъяснимые пробелы в карьере, несоответствие заявленных навыков опыту. Если их нет, оставь это поле пустым.
+7.  **questionsForInterview:** Предложи 3-4 умных вопроса для собеседования, которые помогут прояснить "минусы" или глубже понять опыт кандидата.
+8.  **contactInfo:** Извлеки всю контактную информацию: email, телефон, LinkedIn и другие ссылки (сайт, Telegram). Если чего-то нет, оставь поле пустым.
 
-Ответ должен быть строго в формате JSON в соответствии с предоставленной схемой. Используй camelCase для ключей.
+Ответ должен быть строго в формате JSON в соответствии с предоставленной схемой.
 
 --- БРИФ ВАКАНСИИ ---
 ${jobDescription}
 
 --- РЕЗЮМЕ КАНДИДАТА ---
 ${resumeText}
-`;
+--- КОНЕЦ РЕЗЮМЕ ---`;
           
-          const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+          const response = await generateContentWithFallback({
             contents: prompt,
             config: {
               responseMimeType: 'application/json',
@@ -107,195 +231,91 @@ ${resumeText}
               temperature: 0.3,
             },
           });
-
           const resultJson: AnalysisResult = JSON.parse(response.text);
-          setResults(prev => prev.map((r, index) => index === i ? { ...r, analysis: resultJson, isLoading: false } : r));
-        
-        } catch (e: any) {
-          console.error(`Error analyzing ${file.name}:`, e);
-          const errorMessage = e.message || 'Не удалось проанализировать файл.';
-          setResults(prev => prev.map((r, index) => index === i ? { ...r, error: errorMessage, isLoading: false } : r));
+          setResults(prev => {
+            const newResults = [...prev];
+            newResults[i] = { ...newResults[i], analysis: resultJson, isLoading: false };
+            return newResults;
+          });
+        } catch (err: any) {
+          const errorMessage = getApiErrorMessage(err, 'Не удалось проанализировать файл.');
+          setResults(prev => {
+            const newResults = [...prev];
+            newResults[i] = { ...newResults[i], error: errorMessage, isLoading: false };
+            return newResults;
+          });
+          if (errorMessage.includes("Вы превысили лимит")) {
+            setOverallError(errorMessage);
+            break; // Stop processing further files
+          }
         }
       }
-
-    } catch (e) {
-      console.error(e);
-      setOverallError('Произошла ошибка при обработке брифа вакансии. Убедитесь, что это валидный PDF файл.');
-      setResults(prev => prev.map(r => ({ ...r, isLoading: false, error: 'Анализ отменен из-за ошибки с брифом.' })));
+    } catch (error: any) {
+      setOverallError(getApiErrorMessage(error, 'Произошла непредвиденная ошибка.'));
     } finally {
       setIsAnalyzing(false);
     }
   };
-  
-  const getProgressBarProps = (percentage: number) => {
-    let colorClass = 'bg-red-500';
-    if (percentage >= 70) {
-      colorClass = 'bg-green-500';
-    } else if (percentage >= 40) {
-      colorClass = 'bg-yellow-500';
-    }
-    return {
-      width: `${Math.max(0, Math.min(100, percentage))}%`,
-      colorClass,
-    };
-  };
-  
-  return (
-    <div className="p-4 sm:p-8 h-full overflow-y-auto">
-      <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-800">Анализатор Резюме</h2>
-            <p className="mt-2 text-slate-600 max-w-3xl mx-auto">Выберите активную вакансию в шапке сайта и загрузите резюме для объективного анализа на основе ИИ.</p>
-        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-            <div className="flex flex-col h-full">
-              <h3 className="mb-2 font-medium text-slate-700">Активная вакансия</h3>
-              <div className="flex-grow flex flex-col p-4 bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg justify-center items-center">
-                  {activeVacancy ? (
-                      <div className="text-center">
-                          <Briefcase className="w-12 h-12 mx-auto text-blue-600 mb-2"/>
-                          <p className="font-bold text-lg text-slate-800">{activeVacancy.title}</p>
-                          <p className="text-sm text-slate-600">Бриф этой вакансии будет использован для анализа.</p>
-                      </div>
-                  ) : (
-                      <div className="text-center text-slate-500">
-                          <Briefcase className="w-12 h-12 mx-auto mb-2"/>
-                          <p className="font-semibold">Вакансия не выбрана</p>
-                          <p className="text-sm">Пожалуйста, выберите активную вакансию в шапке сайта.</p>
-                      </div>
-                  )}
-              </div>
-          </div>
-          <FileUpload 
-              title="Резюме кандидатов"
-              files={resumeFiles}
-              setFiles={setResumeFiles}
-              multiple={true}
-              accept=".pdf"
+ return (
+    <div className="p-4 sm:p-8 h-full flex flex-col">
+      <div className="text-center mb-8 flex-shrink-0">
+        <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-200">Анализатор резюме</h2>
+        <p className="mt-2 text-slate-600 dark:text-slate-400">Сравните резюме кандидатов с требованиями вакансии с помощью ИИ.</p>
+      </div>
+      
+      <div className="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-0">
+        <div className="flex flex-col gap-6">
+          <FileUpload
+            title="Загрузите резюме (PDF)"
+            files={resumeFiles}
+            setFiles={setResumeFiles}
+            multiple={true}
+            accept=".pdf"
           />
-        </div>
-
-        <div className="text-center mb-8">
-            <button
-                onClick={handleAnalyze}
-                disabled={isAnalyzing || !activeVacancy || resumeFiles.length === 0}
-                className="inline-flex items-center justify-center gap-3 px-8 py-3 bg-blue-600 text-white font-bold rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-lg hover:shadow-blue-500/50 disabled:bg-blue-500 disabled:opacity-70 disabled:scale-100 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75"
-            >
-                {isAnalyzing ? (
-                    <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Анализ... ({results.filter(r => !r.isLoading).length}/{resumeFiles.length})</span>
-                    </>
-                ) : (
-                    <>
-                        <Sparkles className="w-6 h-6" />
-                        <span>Анализировать ({resumeFiles.length})</span>
-                    </>
-                )}
-            </button>
-        </div>
-        
-        {overallError && <div className="text-center p-4 mb-6 bg-red-100/70 text-red-700 rounded-lg border border-red-300">{overallError}</div>}
-
-        {results.length > 0 && (
-            <div className="space-y-6">
-                <h3 className="text-2xl font-bold text-slate-800 text-center">Результаты анализа</h3>
-                {results.map((res, index) => (
-                    <div key={index} className="p-5 bg-white/40 backdrop-blur-lg border border-white/50 rounded-2xl shadow-md animate-fade-in-up">
-                        <h4 className="font-bold text-lg mb-3 text-slate-800 break-words">{res.fileName}</h4>
-                        {res.isLoading && (
-                            <div className="flex items-center gap-2 text-slate-600">
-                                <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                                <span>Идет анализ...</span>
-                            </div>
-                        )}
-                        {res.error && (
-                            <div className="p-3 text-sm bg-red-100/70 text-red-800 border border-red-300 rounded-lg">
-                                <strong>Ошибка:</strong> {res.error}
-                            </div>
-                        )}
-                        {res.analysis && (() => {
-                          const progressBar = getProgressBarProps(res.analysis.matchPercentage);
-                          const { contactInfo } = res.analysis;
-                          const hasContactInfo = contactInfo && (contactInfo.email || contactInfo.phone || contactInfo.linkedin || contactInfo.other);
-
-                          return (
-                            <div className="space-y-4">
-                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-2">
-                                  <h5 className="font-bold text-xl text-slate-900">{res.analysis.title}</h5>
-                                  <span className={`font-bold text-lg ${progressBar.colorClass.replace('bg-', 'text-')}`}>{res.analysis.matchPercentage}% совпадение</span>
-                                </div>
-                                <div className="w-full bg-gray-200/50 rounded-full h-2.5 dark:bg-gray-700/30">
-                                    <div 
-                                        className={`h-2.5 rounded-full transition-all duration-500 ${progressBar.colorClass}`} 
-                                        style={{ width: progressBar.width }}
-                                    ></div>
-                                </div>
-                                
-                                {hasContactInfo && (
-                                  <div className="mt-4 pt-4 border-t border-white/50">
-                                    <h6 className="font-semibold mb-2 text-slate-800">Контактная информация</h6>
-                                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-700">
-                                      {contactInfo.email && (
-                                        <a href={`mailto:${contactInfo.email}`} className="flex items-center gap-2 hover:text-blue-600 transition-colors">
-                                          <MailIcon className="w-4 h-4" />
-                                          <span>{contactInfo.email}</span>
-                                        </a>
-                                      )}
-                                      {contactInfo.phone && (
-                                        <a href={`tel:${contactInfo.phone}`} className="flex items-center gap-2 hover:text-blue-600 transition-colors">
-                                          <PhoneIcon className="w-4 h-4" />
-                                          <span>{contactInfo.phone}</span>
-                                        </a>
-                                      )}
-                                      {contactInfo.linkedin && (
-                                         <a href={contactInfo.linkedin} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:text-blue-600 transition-colors">
-                                            <LinkedinIcon className="w-4 h-4" />
-                                            <span className="truncate max-w-xs">{contactInfo.linkedin.replace(/^(https?:\/\/)?(www\.)?/,'')}</span>
-                                        </a>
-                                      )}
-                                      {contactInfo.other && (
-                                        <span className="flex items-center gap-2">
-                                          <Paperclip className="w-4 h-4" />
-                                          <span>{contactInfo.other}</span>
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-
-                                <p className="text-slate-700 text-base mt-4 pt-4 border-t border-white/50">{res.analysis.summary}</p>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
-                                        <h6 className="font-bold mb-2 flex items-center gap-2 text-green-800"><ThumbsUp className="w-5 h-5 text-green-600"/>Плюсы</h6>
-                                        <ul className="list-disc list-inside space-y-1 text-sm text-slate-700 pl-2">
-                                            {res.analysis.pros.map((s, i) => <li key={i}>{s}</li>)}
-                                        </ul>
-                                    </div>
-                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-                                        <h6 className="font-bold mb-2 flex items-center gap-2 text-red-800"><ThumbsDown className="w-5 h-5 text-red-600"/>Минусы</h6>
-                                        <ul className="list-disc list-inside space-y-1 text-sm text-slate-700 pl-2">
-                                            {res.analysis.cons.map((w, i) => <li key={i}>{w}</li>)}
-                                        </ul>
-                                    </div>
-                                </div>
-                                <div>
-                                    <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                                        <h6 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><HelpCircle className="w-5 h-5 text-blue-600"/>Вопросы для интервью</h6>
-                                        <ul className="list-disc list-inside space-y-1 text-sm text-slate-700 pl-2">
-                                            {res.analysis.questionsForInterview.map((q, i) => <li key={i}>{q}</li>)}
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                          )
-                        })()}
-                    </div>
-                ))}
+          <button
+            onClick={handleAnalyze}
+            disabled={isAnalyzing || resumeFiles.length === 0 || !activeVacancy}
+            className="aurora-button-primary inline-flex items-center justify-center gap-3 px-8 py-3 text-white font-bold rounded-lg disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isAnalyzing ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Анализ... ({results.filter(r => !r.isLoading).length + 1}/{resumeFiles.length})</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-6 h-6" />
+                <span>Анализировать ({resumeFiles.length})</span>
+              </>
+            )}
+          </button>
+          
+          {!activeVacancy && (
+            <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-center text-sm">
+              <p className="text-yellow-800 dark:text-yellow-400 font-semibold">Внимание: Вакансия не выбрана. Для анализа выберите активную вакансию в шапке сайта.</p>
             </div>
-        )}
+          )}
+          {overallError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-center text-sm">
+                <p className="text-red-800 dark:text-red-400 font-semibold">{overallError}</p>
+              </div>
+            )}
+        </div>
+
+        <div className="bg-white/30 dark:bg-slate-800/30 backdrop-blur-xl border border-white/40 dark:border-slate-700/40 rounded-2xl p-4 overflow-y-auto">
+          <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-4 text-lg">Результаты анализа</h3>
+          <div className="space-y-4">
+            {results.length === 0 && !isAnalyzing && (
+              <div className="text-center py-10 text-slate-500 dark:text-slate-400">
+                Результаты появятся здесь после анализа.
+              </div>
+            )}
+            {results.map((result, index) => (
+              <ResultCard key={index} result={result} />
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

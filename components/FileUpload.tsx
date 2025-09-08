@@ -20,12 +20,12 @@ const formatBytes = (bytes: number, decimals = 2): string => {
 
 const FilePreviewIcon: React.FC<{ file: File }> = ({ file }) => {
     if (file.type.startsWith('video/')) {
-        return <Video className="w-5 h-5 text-slate-500 flex-shrink-0" />;
+        return <Video className="w-5 h-5 text-slate-500 dark:text-slate-400 flex-shrink-0" />;
     }
     if (file.type.startsWith('audio/')) {
-        return <Mic className="w-5 h-5 text-slate-500 flex-shrink-0" />;
+        return <Mic className="w-5 h-5 text-slate-500 dark:text-slate-400 flex-shrink-0" />;
     }
-    return <Paperclip className="w-5 h-5 text-slate-500 flex-shrink-0" />;
+    return <Paperclip className="w-5 h-5 text-slate-500 dark:text-slate-400 flex-shrink-0" />;
 };
 
 
@@ -99,11 +99,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
         className="flex flex-col h-full relative"
         onDragEnter={handleDragIn}
     >
-      <h3 className="mb-2 font-medium text-slate-700">{title}</h3>
-      <div className="flex-grow flex flex-col p-4 bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg">
+      <h3 className="mb-2 font-medium text-slate-700 dark:text-slate-300">{title}</h3>
+      <div className="flex-grow flex flex-col p-4 bg-white/30 dark:bg-slate-800/30 backdrop-blur-xl border border-white/40 dark:border-slate-700/40 rounded-2xl shadow-lg">
         {files.length === 0 ? (
           <div
-            className="flex-grow flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-colors duration-300 border-slate-400/50 hover:border-blue-400"
+            className="flex-grow flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-colors duration-300 border-slate-400/50 dark:border-slate-600/50 hover:border-blue-400 dark:hover:border-blue-500"
           >
             <input
               type="file"
@@ -114,32 +114,32 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
               accept={accept}
             />
             <label htmlFor={`file-upload-${title.replace(/\s/g, '-')}`} className="cursor-pointer text-center">
-              <UploadCloud className="w-12 h-12 mx-auto text-slate-500 mb-2"/>
-              <p className="font-semibold text-slate-700">Перетащите файлы сюда</p>
-              <p className="text-sm text-slate-500">или нажмите для выбора</p>
-              <p className="text-xs text-slate-400 mt-2">Поддерживается: {accept}</p>
+              <UploadCloud className="w-12 h-12 mx-auto text-slate-500 dark:text-slate-400 mb-2"/>
+              <p className="font-semibold text-slate-700 dark:text-slate-300">Перетащите файлы сюда</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">или нажмите для выбора</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">Поддерживается: {accept}</p>
             </label>
           </div>
         ) : (
           <div className="flex-grow overflow-y-auto pr-2">
             <ul className="space-y-2">
               {files.map((file, index) => (
-                <li key={index} className="flex items-center justify-between p-2 bg-white/50 rounded-lg shadow-sm">
+                <li key={index} className="flex items-center justify-between p-2 bg-white/50 dark:bg-slate-700/40 rounded-lg shadow-sm">
                   <div className="flex items-center gap-3 overflow-hidden">
                     <FilePreviewIcon file={file} />
                     <div className="overflow-hidden">
-                      <p className="text-sm font-medium text-slate-800 truncate" title={file.name}>{file.name}</p>
-                      <p className="text-xs text-slate-500">{formatBytes(file.size)}</p>
+                      <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate" title={file.name}>{file.name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{formatBytes(file.size)}</p>
                     </div>
                   </div>
-                  <button onClick={() => removeFile(file)} className="p-1 rounded-full text-slate-500 hover:bg-red-500/20 hover:text-red-600 transition-colors flex-shrink-0">
+                  <button onClick={() => removeFile(file)} className="p-1 rounded-full text-slate-500 dark:text-slate-400 hover:bg-red-500/20 hover:text-red-600 dark:hover:text-red-400 transition-colors flex-shrink-0">
                     <X className="w-4 h-4" />
                   </button>
                 </li>
               ))}
             </ul>
              {multiple && (
-                <button onClick={() => document.getElementById(`file-upload-${title.replace(/\s/g, '-')}`)?.click()} className="w-full mt-3 text-center text-sm py-2 bg-white/40 hover:bg-white/70 text-blue-600 font-semibold rounded-lg transition-colors">
+                <button onClick={() => document.getElementById(`file-upload-${title.replace(/\s/g, '-')}`)?.click()} className="w-full mt-3 text-center text-sm py-2 bg-white/40 dark:bg-slate-700/50 hover:bg-white/70 dark:hover:bg-slate-700/80 text-blue-600 dark:text-blue-400 font-semibold rounded-lg transition-colors">
                     Добавить еще файлы...
                 </button>
             )}
@@ -156,7 +156,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ title, files, setFiles, 
           onDrop={handleDrop}
         >
           <div className="w-full h-full flex items-center justify-center bg-blue-500/20 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-3xl">
-            <div className="text-center font-bold text-blue-800 pointer-events-none">
+            <div className="text-center font-bold text-blue-800 dark:text-blue-200 pointer-events-none">
                 <UploadCloud className="w-16 h-16 mx-auto mb-2"/>
                 <p>Отпустите, чтобы загрузить</p>
             </div>

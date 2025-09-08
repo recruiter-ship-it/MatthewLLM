@@ -1,7 +1,7 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useReducer } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { Tab, User, Vacancy, Priority, Task, KanbanColumn, KanbanSwimlane } from './types';
+import { Tab, CompanyProfile, Vacancy, Priority, Recruiter, VacancyStage, WidgetLink } from './types';
 import Header from './components/Header';
 import Login from './components/Login';
 import ProfileModal from './components/ProfileModal';
@@ -11,185 +11,321 @@ import VacancyModal from './components/VacancyModal';
 import VacancyDetailView from './components/VacancyDetailView';
 import InterviewAnalyzer from './components/InterviewAnalyzer';
 import MSourcer from './components/MSourcer';
-import RecruiterChatWidget from './components/RecruiterChatWidget';
-import TasksDashboard from './components/TasksDashboard';
-import TaskModal from './components/TaskModal';
-import { X, AiChat } from './components/icons/Icons';
+import RecruiterChatWidget, { ChatWidgetHandle } from './components/RecruiterChatWidget';
+import { X, MatthewLogoIcon } from './components/icons/Icons';
+import Sidebar from './components/Sidebar';
+import HomeDashboard from './components/HomeDashboard';
+import AIAgentDashboard from './components/AIAgentDashboard';
+import { VacanciesContext } from './components/VacanciesContext';
+import ExtensionHost from './components/ExtensionHost';
+
 
 declare global {
     interface Window {
-        chrome?: any;
+        SpeechRecognition: any;
+        webkitSpeechRecognition: any;
     }
+    const chrome: any;
 }
 
-const IS_EXTENSION = window.chrome && window.chrome.runtime && window.chrome.runtime.id;
+const IS_EXTENSION = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
 
-type StoredUser = User & { password?: string };
+type StoredUser = CompanyProfile & { password?: string };
+
+// --- Reducer for Vacancies State Management ---
+
+type VacancyAction =
+  | { type: 'SET_ALL', payload: Vacancy[] }
+  | { type: 'ADD_OR_UPDATE', payload: Omit<Vacancy, 'id'> & { id?: string } }
+  | { type: 'DELETE', payload: { id: string } }
+  | { type: 'CHANGE_PRIORITY', payload: { id: string, newPriority: Priority } }
+  | { type: 'CHANGE_STAGE', payload: { id: string, newStage: VacancyStage } }
+  | { type: 'ASSIGN_RECRUITER', payload: { vacancyId: string, recruiterId: string | null } }
+  | { type: 'UPDATE_DETAILS', payload: Vacancy | ((prev: Vacancy) => Vacancy), meta: { id: string } };
+
+const vacanciesReducer = (state: Vacancy[], action: VacancyAction): Vacancy[] => {
+  switch (action.type) {
+    case 'SET_ALL':
+      return action.payload;
+
+    case 'ADD_OR_UPDATE': {
+      const vacancyData = action.payload;
+      const existingIndex = vacancyData.id ? state.findIndex(v => v.id === vacancyData.id) : -1;
+      
+      if (existingIndex > -1) {
+        // Update existing
+        const newState = [...state];
+        newState[existingIndex] = { ...state[existingIndex], ...vacancyData };
+        return newState;
+      } else {
+        // Add new
+        const newVacancy: Vacancy = {
+            id: Date.now().toString(),
+            ...vacancyData,
+            resumes: [], // Ensure new vacancies have default empty arrays
+        };
+        return [...state, newVacancy];
+      }
+    }
+      
+    case 'DELETE':
+      return state.filter(v => v.id !== action.payload.id);
+
+    case 'CHANGE_PRIORITY':
+      return state.map(v => v.id === action.payload.id ? { ...v, priority: action.payload.newPriority } : v);
+
+    case 'CHANGE_STAGE':
+        return state.map(v => v.id === action.payload.id ? { ...v, stage: action.payload.newStage } : v);
+      
+    case 'ASSIGN_RECRUITER':
+      return state.map(v => v.id === action.payload.vacancyId ? { ...v, recruiterId: action.payload.recruiterId ?? undefined } : v);
+
+    case 'UPDATE_DETAILS': {
+        const index = state.findIndex(v => v.id === action.meta.id);
+        if (index === -1) return state;
+        
+        const newState = [...state];
+        const currentVacancy = state[index];
+        const updatedVacancy = typeof action.payload === 'function' 
+            ? action.payload(currentVacancy) 
+            : action.payload;
+            
+        newState[index] = updatedVacancy;
+        return newState;
+    }
+      
+    default:
+      return state;
+  }
+};
+
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>(Tab.Vacancies);
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfile | null>(null);
+  const [activeRecruiterId, setActiveRecruiterId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>(Tab.Home);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState<boolean>(false);
-  const [vacancies, setVacancies] = useState<Vacancy[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>([]);
-  const [kanbanSwimlanes, setKanbanSwimlanes] = useState<KanbanSwimlane[]>([]);
-  const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<string[]>([]);
+  
+  // Use reducer for all vacancy state logic
+  const [vacancies, dispatchVacancies] = useReducer(vacanciesReducer, []);
+  
   const [registeredUsers, setRegisteredUsers] = useState<StoredUser[]>([]);
   const [isVacancyModalOpen, setIsVacancyModalOpen] = useState(false);
-  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [editingVacancy, setEditingVacancy] = useState<Vacancy | null>(null);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [addingTaskLocation, setAddingTaskLocation] = useState<{columnId: string, swimlaneId: string} | null>(null);
   const [viewingVacancy, setViewingVacancy] = useState<Vacancy | null>(null);
   const [isLoadingStorage, setIsLoadingStorage] = useState<boolean>(true);
   const [isChatWidgetOpen, setIsChatWidgetOpen] = useState<boolean>(false);
-  const [activeVacancyId, setActiveVacancyId] = useState<string | null>(null);
+  const [activeVacancyByRecruiter, setActiveVacancyByRecruiter] = useState<{ [key: string]: string | null }>({});
+  const [isWakeWordEnabled, setIsWakeWordEnabled] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [isAssistantVoiceEnabled, setIsAssistantVoiceEnabled] = useState(true);
+
+  // --- NEW: Personalized Widgets State ---
+  const [userWidgets, setUserWidgets] = useState<{ [recruiterId: string]: WidgetLink[] }>({});
+  
+  const chatWidgetRef = useRef<ChatWidgetHandle>(null);
+  const wakeWordRecognizerRef = useRef<any>(null);
+  
+  const storage = IS_EXTENSION ? chrome.storage.local : localStorage;
+  
+  const getItem = async (key: string) => {
+    if (IS_EXTENSION) {
+        const result = await storage.get(key);
+        return result[key] ? JSON.parse(result[key]) : null;
+    }
+    const item = storage.getItem(key);
+    return item ? JSON.parse(item) : null;
+  };
+  
+  const setItem = async (key: string, value: any) => {
+     const stringValue = JSON.stringify(value);
+     if (IS_EXTENSION) {
+        await storage.set({ [key]: stringValue });
+     } else {
+        storage.setItem(key, stringValue);
+     }
+  };
+
+  const removeItem = async (key: string) => {
+      if (IS_EXTENSION) {
+          await storage.remove(key);
+      } else {
+          storage.removeItem(key);
+      }
+  };
+
+
+  // Load theme on startup
+  useEffect(() => {
+    const loadThemePreference = async () => {
+      let storedTheme = IS_EXTENSION ? (await storage.get('theme')).theme : localStorage.getItem('theme');
+
+      if (storedTheme === 'dark' || storedTheme === 'light') {
+        setTheme(storedTheme);
+      } else {
+        setTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      }
+    };
+    loadThemePreference();
+  }, []);
+
+  // Apply and save theme when state changes
+  useEffect(() => {
+    const root = window.document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+
+    try {
+        if (IS_EXTENSION) {
+            storage.set({ theme });
+        } else {
+            localStorage.setItem('theme', theme);
+        }
+    } catch(e) {
+        console.error("Could not save theme", e)
+    }
+  }, [theme]);
 
 
   useEffect(() => {
-    // Set the PDF.js worker source based on the environment
-    if (IS_EXTENSION) {
-      const workerUrl = window.chrome.runtime.getURL('pdf.worker.mjs');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-    } else {
-      const PDF_WORKER_URL = "https://esm.sh/pdfjs-dist@^4.4.168/build/pdf.worker.mjs";
-      pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
-    }
+    // Set the PDF.js worker source
+    const PDF_WORKER_URL = "https://esm.sh/pdfjs-dist@^4.4.168/build/pdf.worker.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
 
     const loadData = async () => {
-      let savedUser: User | null = null;
-      let savedVacancies: Vacancy[] = [];
-      let savedTasks: any[] = []; // Can be old or new format
-      let savedRegisteredUsers: StoredUser[] = [];
-      let savedActiveVacancyId: string | null = null;
-      let savedColumns: KanbanColumn[] = [];
-      let savedSwimlanes: KanbanSwimlane[] = [];
-      let savedCollapsedSwimlanes: string[] = [];
+      let savedUser: CompanyProfile | null = await getItem('user');
+      let savedVacancies: Vacancy[] = await getItem('vacancies') || [];
+      let savedRegisteredUsers: StoredUser[] = await getItem('registeredUsers') || [];
+      let savedActiveRecruiterId: string | null = (IS_EXTENSION ? (await storage.get('activeRecruiterId')).activeRecruiterId : localStorage.getItem('activeRecruiterId')) || null;
+      let savedActiveVacancyByRecruiter: { [key: string]: string | null } = await getItem('activeVacancyByRecruiter') || {};
+      const savedUserWidgets = await getItem('userWidgets') || {};
+      const savedVoiceEnabled = await getItem('isAssistantVoiceEnabled');
 
-      if (IS_EXTENSION) {
-        const data = await window.chrome.storage.local.get(['user', 'vacancies', 'tasks', 'registeredUsers', 'activeVacancyId', 'kanbanColumns', 'kanbanSwimlanes', 'collapsedSwimlanes']);
-        savedUser = data.user || null;
-        savedVacancies = data.vacancies || [];
-        savedTasks = data.tasks || [];
-        savedRegisteredUsers = data.registeredUsers || [];
-        savedActiveVacancyId = data.activeVacancyId || null;
-        savedColumns = data.kanbanColumns || [];
-        savedSwimlanes = data.kanbanSwimlanes || [];
-        savedCollapsedSwimlanes = data.collapsedSwimlanes || [];
-      } else {
-        try {
-          const userStr = localStorage.getItem('user');
-          if (userStr) savedUser = JSON.parse(userStr);
-          const vacanciesStr = localStorage.getItem('vacancies');
-          if (vacanciesStr) savedVacancies = JSON.parse(vacanciesStr);
-          const tasksStr = localStorage.getItem('tasks');
-          if (tasksStr) savedTasks = JSON.parse(tasksStr);
-          const regUsersStr = localStorage.getItem('registeredUsers');
-          if (regUsersStr) savedRegisteredUsers = JSON.parse(regUsersStr);
-          savedActiveVacancyId = localStorage.getItem('activeVacancyId');
-          const columnsStr = localStorage.getItem('kanbanColumns');
-          if (columnsStr) savedColumns = JSON.parse(columnsStr);
-          const swimlanesStr = localStorage.getItem('kanbanSwimlanes');
-          if (swimlanesStr) savedSwimlanes = JSON.parse(swimlanesStr);
-          const collapsedStr = localStorage.getItem('collapsedSwimlanes');
-          if (collapsedStr) savedCollapsedSwimlanes = JSON.parse(collapsedStr);
-        } catch (error) {
-          console.error("Could not parse data from localStorage", error);
-        }
-      }
-      
+
       if (savedUser) {
-        setUser(savedUser);
+        savedUser.recruiters = savedUser.recruiters || [];
+        setCompanyProfile(savedUser);
         setIsAuthenticated(true);
+        setActiveRecruiterId(savedActiveRecruiterId || savedUser.id);
       }
-      setVacancies(savedVacancies);
-      setRegisteredUsers(savedRegisteredUsers);
-      setActiveVacancyId(savedActiveVacancyId);
-      setCollapsedSwimlanes(savedCollapsedSwimlanes);
-
-      // --- Kanban Board Setup & Migration ---
-      const defaultColumns = [
-        { id: 'col-todo-' + Date.now(), title: 'К выполнению' },
-        { id: 'col-inprogress-' + Date.now(), title: 'В работе' },
-        { id: 'col-done-' + Date.now(), title: 'Готово' },
-      ];
-      const defaultSwimlanes = [
-        { id: savedUser?.id || 'user-swimlane-' + Date.now(), title: savedUser?.name || 'Мои задачи' },
-        { id: 'general-swimlane-' + Date.now(), title: 'Общие задачи' },
-      ];
       
-      const columnsToSet = savedColumns.length > 0 ? savedColumns : defaultColumns;
-      const swimlanesToSet = savedSwimlanes.length > 0 ? savedSwimlanes : defaultSwimlanes;
+      const migratedVacancies = savedVacancies.map(v => ({ ...v, stage: v.stage || VacancyStage.Sourcing }));
+      dispatchVacancies({ type: 'SET_ALL', payload: migratedVacancies });
+      setRegisteredUsers(savedRegisteredUsers);
+      setActiveVacancyByRecruiter(savedActiveVacancyByRecruiter);
+      
+      setUserWidgets(savedUserWidgets);
 
-      setKanbanColumns(columnsToSet);
-      setKanbanSwimlanes(swimlanesToSet);
-
-      const needsMigration = savedTasks.length > 0 && savedTasks[0].priority === undefined;
-
-      if (needsMigration) {
-        const migratedTasks: Task[] = savedTasks.map((t: any) => {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { priority, isCompleted, ...rest } = t;
-          return {
-            ...rest,
-            description: t.description || '',
-            columnId: t.isCompleted ? columnsToSet[2].id : columnsToSet[0].id,
-            swimlaneId: swimlanesToSet[0].id,
-            priority: Priority.Medium, // Add default priority
-          };
-        });
-        setTasks(migratedTasks);
-      } else {
-        setTasks(savedTasks as Task[]);
+      if (savedVoiceEnabled !== null) {
+        setIsAssistantVoiceEnabled(savedVoiceEnabled);
       }
-
       setIsLoadingStorage(false);
     };
     loadData();
   }, []);
   
+  // Wake Word Listener Effect
   useEffect(() => {
-    if (isLoadingStorage) return; // Don't save initial empty state
-    
-    const dataToSave = {
-        vacancies,
-        tasks,
-        registeredUsers,
-        activeVacancyId,
-        kanbanColumns,
-        kanbanSwimlanes,
-        collapsedSwimlanes,
-    };
-    
-    if (IS_EXTENSION) {
-      window.chrome.storage.local.set(dataToSave);
-    } else {
-      for (const [key, value] of Object.entries(dataToSave)) {
-          if (value !== null && value !== undefined) {
-             localStorage.setItem(key, JSON.stringify(value));
-          } else {
-             localStorage.removeItem(key);
-          }
-      }
-    }
-  }, [vacancies, tasks, registeredUsers, activeVacancyId, kanbanColumns, kanbanSwimlanes, collapsedSwimlanes, isLoadingStorage]);
+    if (IS_EXTENSION) return; // Disable wake word in extension
 
-  const persistUser = (appUser: User | null) => {
-    if (IS_EXTENSION) {
-      if (appUser) {
-        window.chrome.storage.local.set({ user: appUser });
-      } else {
-        window.chrome.storage.local.remove('user');
-      }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      if(isWakeWordEnabled) alert("Голосовая активация не поддерживается в вашем браузере.");
+      return;
+    }
+
+    if (isWakeWordEnabled && !wakeWordRecognizerRef.current) {
+        const recognizer = new SpeechRecognition();
+        recognizer.lang = 'ru-RU';
+        recognizer.continuous = true;
+        recognizer.interimResults = false;
+
+        recognizer.onresult = (event: any) => {
+            const lastTranscript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+            if (lastTranscript.includes('мэтью') || lastTranscript.includes('matthew')) {
+                console.log('Wake word "Matthew" detected!');
+                setIsChatWidgetOpen(true);
+                setTimeout(() => chatWidgetRef.current?.triggerVoiceInput(), 300);
+                setIsWakeWordEnabled(false);
+            }
+        };
+
+        recognizer.onend = () => {
+            if (wakeWordRecognizerRef.current) {
+                setTimeout(() => { try { wakeWordRecognizerRef.current?.start(); } catch (e) { console.log("Recognizer stopped.", e); } }, 250);
+            }
+        };
+        
+        recognizer.onerror = (event: any) => {
+            console.error("Wake word recognizer error:", event.error);
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                setIsWakeWordEnabled(false);
+                alert("Доступ к микрофону не предоставлен. Голосовая активация отключена.");
+            }
+        };
+        
+        wakeWordRecognizerRef.current = recognizer;
+        try { recognizer.start(); } catch (e) {
+            console.error("Could not start wake word recognizer:", e);
+            setIsWakeWordEnabled(false);
+        }
+    } else if (!isWakeWordEnabled && wakeWordRecognizerRef.current) {
+        wakeWordRecognizerRef.current.stop();
+        wakeWordRecognizerRef.current = null;
+    }
+
+    return () => {
+        if (wakeWordRecognizerRef.current) {
+            wakeWordRecognizerRef.current.stop();
+            wakeWordRecognizerRef.current = null;
+        }
+    };
+  }, [isWakeWordEnabled]);
+
+
+  useEffect(() => {
+    if (isLoadingStorage) return;
+    
+    setItem('vacancies', vacancies);
+    setItem('registeredUsers', registeredUsers);
+    if (activeRecruiterId) {
+        if (IS_EXTENSION) storage.set({ activeRecruiterId }); else localStorage.setItem('activeRecruiterId', activeRecruiterId);
     } else {
-      // Persist only registered users, not guests
-      if (appUser && appUser.email) {
-         localStorage.setItem('user', JSON.stringify(appUser));
-      } else {
-         localStorage.removeItem('user');
+        if (IS_EXTENSION) storage.remove('activeRecruiterId'); else localStorage.removeItem('activeRecruiterId');
+    }
+    setItem('activeVacancyByRecruiter', activeVacancyByRecruiter);
+    setItem('userWidgets', userWidgets);
+    setItem('isAssistantVoiceEnabled', isAssistantVoiceEnabled);
+  }, [vacancies, registeredUsers, activeRecruiterId, activeVacancyByRecruiter, isLoadingStorage, userWidgets, isAssistantVoiceEnabled]);
+
+  // Hotkeys for chat widget
+  useEffect(() => {
+    if (IS_EXTENSION) return; // Disable hotkeys in extension context
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsChatWidgetOpen(prev => !prev);
       }
+      if (e.key === 'Escape' && isChatWidgetOpen) {
+        e.preventDefault();
+        setIsChatWidgetOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isChatWidgetOpen]);
+
+  const persistUser = (profile: CompanyProfile | null) => {
+    if (profile && profile.email) {
+       setItem('user', profile);
+    } else {
+       removeItem('user');
     }
   };
   
@@ -200,17 +336,16 @@ const App: React.FC = () => {
         return;
       }
       const newUser: StoredUser = {
-        id: new Date().getTime().toString(),
-        name,
-        email,
-        password,
+        id: new Date().getTime().toString(), name, email, password,
         avatar: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41MiAxOWMuNjQtMi4yIDEuODQtNCAzLjIyLTUuMjZD MTAuMDcgMTIuNDkgMTEuMDEgMTIgMTIgMTJzMS45My40OSAzLjI2IDEuNzRjMS4zOCAxLjI2IDIuNTggMy4wNiAzLjIyIDUuMjYiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTAiIHI9IjMiLz48L3N2Zz4=',
+        recruiters: [],
       };
       
       const { password: _, ...userForState } = newUser;
 
       setRegisteredUsers(prev => [...prev, newUser]);
-      setUser(userForState);
+      setCompanyProfile(userForState);
+      setActiveRecruiterId(userForState.id);
       setIsAuthenticated(true);
       persistUser(userForState);
       resolve();
@@ -221,16 +356,16 @@ const App: React.FC = () => {
     return new Promise((resolve, reject) => {
       const foundUser = registeredUsers.find(u => u.email === email);
       if (!foundUser) {
-        reject(new Error('Пользователь не найден.'));
-        return;
+        reject(new Error('Пользователь не найден.')); return;
       }
       if (foundUser.password !== password) {
-        reject(new Error('Неверный пароль.'));
-        return;
+        reject(new Error('Неверный пароль.')); return;
       }
 
       const { password: _, ...userForState } = foundUser;
-      setUser(userForState);
+      userForState.recruiters = userForState.recruiters || [];
+      setCompanyProfile(userForState);
+      setActiveRecruiterId(userForState.id);
       setIsAuthenticated(true);
       persistUser(userForState);
       resolve();
@@ -238,355 +373,185 @@ const App: React.FC = () => {
   }, [registeredUsers]);
 
   const handleGuestLogin = useCallback(() => {
-    const guestUser: User = {
-        id: new Date().getTime().toString(),
-        name: 'Гость',
+    const guestUser: CompanyProfile = {
+        id: new Date().getTime().toString(), name: 'Гость',
         avatar: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiM2NDc0OGIiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi41MiAxOWMuNjQtMi4yIDEuODQtNCAzLjIyLTUuMjZD MTAuMDcgMTIuNDkgMTEuMDEgMTIgMTIgMTJzMS45My40OSAzLjI2IDEuNzRjMS4zOCAxLjI2IDIuNTggMy4wNiAzLjIyIDUuMjYiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTAiIHI9IjMiLz48L3N2Zz4=',
+        recruiters: [],
     };
-    setUser(guestUser);
+    setCompanyProfile(guestUser);
+    setActiveRecruiterId(guestUser.id);
     setIsAuthenticated(true);
-    // Do not save guest session
   }, []);
 
   const handleLogout = useCallback(() => {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
     persistUser(null);
     setIsAuthenticated(false);
-    setUser(null);
+    setCompanyProfile(null);
+    setActiveRecruiterId(null);
+    setActiveVacancyByRecruiter({});
+    removeItem('activeRecruiterId');
+    removeItem('activeVacancyByRecruiter');
   }, []);
 
-  const handleUpdateUser = (updatedUserInfo: Partial<User>) => {
-    if (user) {
-        const updatedUserForState = { ...user, ...updatedUserInfo };
-        setUser(updatedUserForState);
-
-        // Check if it's a registered user (not a guest) and update the main users list
-        if (updatedUserForState.email) {
-            setRegisteredUsers(prevUsers => {
-                return prevUsers.map(regUser => {
-                    if (regUser.email === updatedUserForState.email) {
-                        return { ...regUser, ...updatedUserInfo };
-                    }
-                    return regUser;
-                });
-            });
+  const handleUpdateCompanyProfile = (updatedUserInfo: Partial<CompanyProfile>) => {
+    if (companyProfile) {
+        const updatedProfile = { ...companyProfile, ...updatedUserInfo };
+        setCompanyProfile(updatedProfile);
+        if (updatedProfile.email) {
+            setRegisteredUsers(prevUsers => prevUsers.map(regUser => regUser.email === updatedProfile.email ? { ...regUser, ...updatedUserInfo } : regUser));
         }
-        
-        persistUser(updatedUserForState);
+        persistUser(updatedProfile);
     }
   };
   
-  const handleOpenVacancyModal = (vacancy: Vacancy | null = null) => {
+  const handleUpdateRecruiters = (updatedRecruiters: Recruiter[]) => {
+    if (companyProfile) {
+        handleUpdateCompanyProfile({ ...companyProfile, recruiters: updatedRecruiters });
+    }
+  };
+
+  const handleOpenVacancyModal = useCallback((vacancy: Vacancy | null = null) => {
     setEditingVacancy(vacancy);
     setIsVacancyModalOpen(true);
-  };
+  }, []);
 
-  const handleCloseVacancyModal = () => {
+  const handleCloseVacancyModal = useCallback(() => {
     setEditingVacancy(null);
     setIsVacancyModalOpen(false);
-  };
+  }, []);
   
-  const handleViewVacancy = (vacancy: Vacancy) => {
+  const handleViewVacancy = useCallback((vacancy: Vacancy) => {
     setViewingVacancy(vacancy);
-  };
+  }, []);
 
-  const handleSaveVacancy = (vacancyToSave: Omit<Vacancy, 'id'> & { id?: string }) => {
-    if (vacancyToSave.id) {
-      // Update existing
-      setVacancies(vacancies.map(v => v.id === vacancyToSave.id ? { ...v, ...vacancyToSave } as Vacancy : v));
-    } else {
-      // Add new
-      const newVacancy: Vacancy = { 
-          ...vacancyToSave, 
-          id: Date.now().toString(), 
-          briefText: vacancyToSave.briefText || '', 
-          priority: vacancyToSave.priority || Priority.Medium,
-          resumes: []
-      };
-      setVacancies([...vacancies, newVacancy]);
-    }
+  const handleSaveVacancy = useCallback((vacancyData: Omit<Vacancy, 'id'> & { id?: string }) => {
+    dispatchVacancies({ type: 'ADD_OR_UPDATE', payload: vacancyData });
     handleCloseVacancyModal();
-  };
+  }, [handleCloseVacancyModal]);
   
-  const handleDeleteVacancy = (id: string) => {
-    if (activeVacancyId === id) {
-      setActiveVacancyId(null);
-    }
-    setVacancies(vacancies.filter(v => v.id !== id));
-  };
-  
-  const handleUpdateVacancy = (updatedVacancy: Vacancy) => {
-    setVacancies(vacancies.map(v => v.id === updatedVacancy.id ? updatedVacancy : v));
-    // also update the viewingVacancy state to re-render the detail view with new data
-    if (viewingVacancy && viewingVacancy.id === updatedVacancy.id) {
-        setViewingVacancy(updatedVacancy);
-    }
-  };
-
-  const handleVacancyPriorityChange = (id: string, newPriority: Priority) => {
-    setVacancies(vacancies.map(v => v.id === id ? { ...v, priority: newPriority } : v));
-  };
-
-  // --- Task & Kanban Handlers ---
-  const handleOpenTaskModal = (task: Task | null = null, location: {columnId: string, swimlaneId: string} | null = null) => {
-    setEditingTask(task);
-    setAddingTaskLocation(location);
-    setIsTaskModalOpen(true);
-  };
-
-  const handleCloseTaskModal = () => {
-    setEditingTask(null);
-    setAddingTaskLocation(null);
-    setIsTaskModalOpen(false);
-  };
-
-  const handleSaveTask = (taskToSave: Omit<Task, 'id' | 'columnId' | 'swimlaneId'> & { id?: string }) => {
-    if (taskToSave.id) {
-      // Update existing
-      setTasks(tasks.map(t => t.id === taskToSave.id ? { ...t, ...taskToSave } as Task : t));
-    } else {
-      if (!addingTaskLocation) {
-        console.error("Cannot add task without a location on the board.");
-        handleCloseTaskModal();
-        return;
-      }
-      // Add new
-      const newTask: Task = {
-        ...taskToSave,
-        id: Date.now().toString(),
-        columnId: addingTaskLocation.columnId,
-        swimlaneId: addingTaskLocation.swimlaneId,
-        priority: taskToSave.priority || Priority.Medium
-      };
-      setTasks([...tasks, newTask]);
-    }
-    handleCloseTaskModal();
-  };
-
-  const handleDeleteTask = (id: string) => {
-    setTasks(tasks.filter(t => t.id !== id));
-  };
-
-  const handleMoveTask = (taskId: string, newColumnId: string, newSwimlaneId: string, beforeTaskId: string | null) => {
-    setTasks(prevTasks => {
-        const taskToMove = prevTasks.find(t => t.id === taskId);
-        if (!taskToMove) return prevTasks;
-
-        const tasksWithoutMoved = prevTasks.filter(t => t.id !== taskId);
-        
-        const updatedTask = { ...taskToMove, columnId: newColumnId, swimlaneId: newSwimlaneId };
-
-        if (beforeTaskId === null) {
-             return [...tasksWithoutMoved, updatedTask];
-        }
-
-        const insertAtIndex = tasksWithoutMoved.findIndex(t => t.id === beforeTaskId);
-        
-        if (insertAtIndex === -1) {
-             return [...tasksWithoutMoved, updatedTask];
-        }
-
-        const newTasks = [
-            ...tasksWithoutMoved.slice(0, insertAtIndex),
-            updatedTask,
-            ...tasksWithoutMoved.slice(insertAtIndex)
-        ];
-        
-        return newTasks;
+  const handleUpdateVacancy = useCallback((update: Vacancy | ((prev: Vacancy) => Vacancy)) => {
+    setViewingVacancy(prevViewing => {
+        if (!prevViewing) return null;
+        dispatchVacancies({ type: 'UPDATE_DETAILS', payload: update, meta: { id: prevViewing.id } });
+        const updated = typeof update === 'function' ? update(prevViewing) : update;
+        return updated;
     });
+  }, []);
+
+  useEffect(() => {
+    if (viewingVacancy) {
+        const freshVacancy = vacancies.find(v => v.id === viewingVacancy.id);
+        if (freshVacancy) {
+            setViewingVacancy(freshVacancy);
+        } else {
+            setViewingVacancy(null);
+        }
+    }
+  }, [vacancies, viewingVacancy]);
+
+  const handleSelectVacancyForRecruiter = (vacancyId: string | null) => {
+    if (activeRecruiterId) {
+        setActiveVacancyByRecruiter(prev => ({ ...prev, [activeRecruiterId]: vacancyId }));
+    }
   };
 
-  const handleUpdateColumnTitle = (id: string, title: string) => {
-    setKanbanColumns(kanbanColumns.map(c => c.id === id ? { ...c, title } : c));
-  };
-  const handleAddColumn = () => {
-    setKanbanColumns([...kanbanColumns, { id: `col-${Date.now()}`, title: 'Новая колонка' }]);
-  };
-  const handleUpdateSwimlaneTitle = (id: string, title: string) => {
-    setKanbanSwimlanes(kanbanSwimlanes.map(s => s.id === id ? { ...s, title } : s));
-  };
-  const handleAddSwimlane = () => {
-    setKanbanSwimlanes([...kanbanSwimlanes, { id: `swim-${Date.now()}`, title: 'Новая дорожка' }]);
-  };
-  const handleToggleSwimlane = (swimlaneId: string) => {
-    setCollapsedSwimlanes(prev => 
-        prev.includes(swimlaneId) 
-            ? prev.filter(id => id !== swimlaneId)
-            : [...prev, swimlaneId]
-    );
-  };
-
+  // --- User Widgets Handlers ---
+  const handleSaveUserWidgets = useCallback((widgets: { [recruiterId: string]: WidgetLink[] }) => {
+    setUserWidgets(widgets);
+  }, []);
 
   const handleToggleChatWidget = () => {
+    if (isChatWidgetOpen && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
     setIsChatWidgetOpen(prev => !prev);
   };
+  const handleToggleWakeWord = () => { setIsWakeWordEnabled(prev => !prev); };
+  const handleToggleTheme = () => { setTheme(prev => (prev === 'light' ? 'dark' : 'light')); };
+  const handleToggleAssistantVoice = () => {
+    if (isAssistantVoiceEnabled && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
+    setIsAssistantVoiceEnabled(prev => !prev);
+  };
 
-  const tabs = [Tab.Vacancies, Tab.Tasks, Tab.Resumes, Tab.Interviews, Tab.AISourcer];
-  const activeVacancy = vacancies.find(v => v.id === activeVacancyId) || null;
+  const tabs = [Tab.Home, Tab.Vacancies, Tab.Resumes, Tab.Interviews, Tab.AISourcer, Tab.AIAgent];
+  
+  const recruiters = companyProfile?.recruiters || [];
+  const allUsers = companyProfile ? [ {id: companyProfile.id, name: companyProfile.name, avatar: companyProfile.avatar}, ...recruiters] : [];
+  const activeRecruiter = allUsers.find(u => u.id === activeRecruiterId) || companyProfile;
+  const activeVacancyIdForRecruiter = activeRecruiterId ? activeVacancyByRecruiter[activeRecruiterId] : null;
+  const activeVacancy = vacancies.find(v => v.id === activeVacancyIdForRecruiter) || null;
+
+  if (IS_EXTENSION) {
+      return (
+          <ExtensionHost
+            vacancies={vacancies}
+            activeRecruiter={activeRecruiter}
+            activeVacancy={activeVacancy}
+            companyProfile={companyProfile}
+            onSelectVacancy={handleSelectVacancyForRecruiter}
+            onUpdateVacancy={handleUpdateVacancy}
+            dispatchVacancies={dispatchVacancies}
+          />
+      );
+  }
 
   const renderContent = () => {
     switch (activeTab) {
-      case Tab.Resumes:
-        return <ResumeAnalyzer activeVacancy={activeVacancy} />;
-      case Tab.Vacancies:
-        return <VacanciesDashboard 
-                  vacancies={vacancies}
-                  onAddVacancy={() => handleOpenVacancyModal(null)}
-                  onEditVacancy={handleOpenVacancyModal}
-                  onDeleteVacancy={handleDeleteVacancy}
-                  onViewVacancy={handleViewVacancy}
-                  onPriorityChange={handleVacancyPriorityChange}
-                />;
-      case Tab.Tasks:
-        return <TasksDashboard
-                  tasks={tasks}
-                  columns={kanbanColumns}
-                  swimlanes={kanbanSwimlanes}
-                  collapsedSwimlanes={collapsedSwimlanes}
-                  onAddTask={handleOpenTaskModal}
-                  onEditTask={(task) => handleOpenTaskModal(task, null)}
-                  onDeleteTask={handleDeleteTask}
-                  onMoveTask={handleMoveTask}
-                  onUpdateColumnTitle={handleUpdateColumnTitle}
-                  onAddColumn={handleAddColumn}
-                  onUpdateSwimlaneTitle={handleUpdateSwimlaneTitle}
-                  onAddSwimlane={handleAddSwimlane}
-                  onToggleSwimlane={handleToggleSwimlane}
-                />;
-      case Tab.Interviews:
-         return <InterviewAnalyzer activeVacancy={activeVacancy} />;
-      case Tab.AISourcer:
-         return <MSourcer vacancies={vacancies} />;
-      default:
-        return null;
+      case Tab.Home: return <HomeDashboard vacancies={vacancies} userWidgets={userWidgets} onSaveUserWidgets={handleSaveUserWidgets} activeRecruiterId={activeRecruiterId} />;
+      case Tab.Resumes: return <ResumeAnalyzer activeVacancy={activeVacancy} />;
+      case Tab.Vacancies: return <VacanciesDashboard recruiters={recruiters} />;
+      case Tab.Interviews: return <InterviewAnalyzer activeVacancy={activeVacancy} />;
+      case Tab.AISourcer: return <MSourcer vacancies={vacancies} activeVacancy={activeVacancy} />;
+      case Tab.AIAgent: return <AIAgentDashboard vacancies={vacancies} />;
+      default: return null;
     }
   };
   
   if (isLoadingStorage) {
-    const sizeClass = IS_EXTENSION ? 'h-full w-full' : 'h-screen w-screen';
-    return (
-        <div className={`flex items-center justify-center ${sizeClass}`}>
-            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-    );
+    const sizeClass = 'h-screen w-screen';
+    return <div className={`flex items-center justify-center ${sizeClass}`}><div className="w-8 h-8 border-4 border-blue-500 dark:border-blue-400 border-t-transparent rounded-full animate-spin"></div></div>;
   }
 
   if (!isAuthenticated) {
     return <Login onRegister={handleRegister} onLocalLogin={handleLocalLogin} onGuestLogin={handleGuestLogin} />;
   }
+  
+  const contextValue = { vacancies, dispatch: dispatchVacancies, viewVacancy: handleViewVacancy, openVacancyModal: handleOpenVacancyModal };
 
   return (
-    <div className="text-gray-800 min-h-screen flex flex-col">
-      <style>{`
-        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes fade-in-up {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
-        .animate-fade-in-up { animation: fade-in-up 0.5s ease-out forwards; }
-        @keyframes pulse-slow {
-          50% { transform: scale(1.05); }
-        }
-        .animate-pulse-slow { animation: pulse-slow 2s infinite; }
-      `}</style>
-      
-      {user && (
-          <Header 
-            user={user} 
-            onLogout={handleLogout} 
-            onProfileClick={() => setIsProfileModalOpen(true)}
-            activeTab={activeTab}
-            setActiveTab={setActiveTab}
-            tabs={tabs}
-            vacancies={vacancies}
-            activeVacancy={activeVacancy}
-            onSelectVacancy={setActiveVacancyId}
-          />
+    <div className="text-gray-800 dark:text-gray-200 min-h-screen flex">
+      <style>{`.animate-fade-in { animation: fade-in 0.3s ease-out forwards; } .animate-fade-in-up { animation: fade-in-up 0.5s ease-out forwards; } .animate-pulse-slow { animation: pulse-slow 2s infinite; } @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } } @keyframes fade-in-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } } @keyframes pulse-slow { 50% { transform: scale(1.05); } }`}</style>
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} tabs={tabs} />
+      <div className="flex-1 flex flex-col pl-20 transition-all duration-300 ease-in-out">
+        {companyProfile && activeRecruiter && (
+            <Header user={activeRecruiter} onLogout={handleLogout} onProfileClick={() => setIsProfileModalOpen(true)} vacancies={vacancies} activeVacancy={activeVacancy} onSelectVacancy={handleSelectVacancyForRecruiter} isWakeWordEnabled={isWakeWordEnabled} onToggleWakeWord={handleToggleWakeWord} theme={theme} onToggleTheme={handleToggleTheme} isAssistantVoiceEnabled={isAssistantVoiceEnabled} onToggleAssistantVoice={handleToggleAssistantVoice} />
         )}
-
-      <div className="flex-1 flex w-full max-w-full mx-auto px-2 sm:px-6 lg:px-8 py-6 sm:py-8 overflow-hidden gap-x-6">
-          <main className="flex-1 flex flex-col min-w-0">
-            <div className={`bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col ${!IS_EXTENSION && 'min-h-[600px]'}`}>
-              <div key={activeTab} className="animate-fade-in-up w-full h-full">
-                {renderContent()}
-              </div>
-            </div>
-          </main>
-
-          {!IS_EXTENSION && (
-            <aside
-              className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
-                isChatWidgetOpen ? 'w-full sm:w-[400px]' : 'w-0'
-              }`}
-            >
-              <div className="bg-white/30 backdrop-blur-xl border border-white/40 rounded-2xl shadow-lg w-full h-full flex flex-col overflow-hidden">
-                {isChatWidgetOpen && (
-                  <>
-                    <header className="flex items-center justify-between p-4 border-b border-white/30 flex-shrink-0">
-                      <div className="flex items-center gap-2">
-                        <AiChat className="w-6 h-6 text-slate-800" />
-                        <h3 className="font-bold text-slate-800">Мэтью Ассистент</h3>
-                      </div>
-                      <button onClick={handleToggleChatWidget} className="text-slate-600 hover:text-slate-900">
-                        <X className="w-6 h-6" />
-                      </button>
-                    </header>
-                    <div className="flex-grow overflow-hidden bg-transparent animate-fade-in">
-                      <RecruiterChatWidget vacancies={vacancies} />
-                    </div>
-                  </>
-                )}
-              </div>
-            </aside>
-          )}
-      </div>
-      
-      {isProfileModalOpen && user && (
-        <ProfileModal
-          user={user}
-          onClose={() => setIsProfileModalOpen(false)}
-          onUpdateUser={handleUpdateUser}
-        />
-      )}
-
-      {isVacancyModalOpen && (
-        <VacancyModal
-          isOpen={isVacancyModalOpen}
-          onClose={handleCloseVacancyModal}
-          onSave={handleSaveVacancy}
-          vacancy={editingVacancy}
-        />
-      )}
-
-      {isTaskModalOpen && (
-        <TaskModal
-          isOpen={isTaskModalOpen}
-          onClose={handleCloseTaskModal}
-          onSave={handleSaveTask}
-          task={editingTask}
-        />
-      )}
-
-      {viewingVacancy && (
-        <VacancyDetailView
-          vacancy={viewingVacancy}
-          onClose={() => setViewingVacancy(null)}
-          onUpdate={handleUpdateVacancy}
-        />
-      )}
-
-      {/* CHAT FAB for web-app version */}
-      {!IS_EXTENSION && (
-        <div className={`fixed bottom-5 right-5 z-40 transition-transform duration-300 ease-in-out ${isChatWidgetOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
-            <button
-              onClick={handleToggleChatWidget}
-              className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 animate-pulse-slow"
-              aria-label="Открыть чат с ассистентом"
-            >
-              <AiChat className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
-            </button>
+        <div className="flex-1 w-full max-w-full mx-auto px-2 sm:px-6 lg:px-8 py-6 sm:py-8 min-h-0">
+            <main className="w-full h-full"><div className="aurora-panel rounded-2xl shadow-lg w-full h-full flex flex-col min-h-[600px]"><VacanciesContext.Provider value={contextValue}><div key={activeTab} className="animate-fade-in-up w-full h-full">{renderContent()}</div></VacanciesContext.Provider></div></main>
         </div>
-      )}
+      </div>
+      <aside className={`fixed top-5 bottom-5 right-5 transition-transform duration-300 ease-in-out transform ${isChatWidgetOpen ? 'translate-x-0' : 'translate-x-[calc(100%+1.25rem)]'} w-[calc(100%-2.5rem)] max-w-[400px] z-30`}>
+          <div className="aurora-panel rounded-2xl shadow-lg w-full h-full flex flex-col overflow-hidden">
+          {isChatWidgetOpen && (<>
+              <header className="flex items-center justify-between p-4 border-b border-white/30 dark:border-slate-700/30 flex-shrink-0">
+                  <div className="flex items-center gap-2"><MatthewLogoIcon className="w-6 h-6 text-slate-800 dark:text-slate-200" /><h3 className="font-bold text-slate-800 dark:text-slate-200">Мэтью Ассистент</h3></div>
+                  <button onClick={handleToggleChatWidget} className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100"><X className="w-6 h-6" /></button>
+              </header>
+              <div className="flex-grow min-h-0 bg-transparent animate-fade-in"><RecruiterChatWidget ref={chatWidgetRef} vacancies={vacancies} activeRecruiter={activeRecruiter} activeVacancy={activeVacancy} isVoiceEnabled={isAssistantVoiceEnabled} /></div>
+          </>)}
+          </div>
+      </aside>
+      {isProfileModalOpen && companyProfile && ( <ProfileModal companyProfile={companyProfile} activeRecruiterId={activeRecruiterId} onClose={() => setIsProfileModalOpen(false)} onUpdateCompanyProfile={handleUpdateCompanyProfile} onUpdateRecruiters={handleUpdateRecruiters} onSetActiveRecruiter={setActiveRecruiterId} /> )}
+      {isVacancyModalOpen && ( <VacancyModal isOpen={isVacancyModalOpen} onClose={handleCloseVacancyModal} onSave={handleSaveVacancy} vacancy={editingVacancy} recruiters={recruiters} /> )}
+      {viewingVacancy && ( <VacancyDetailView vacancy={viewingVacancy} onClose={() => setViewingVacancy(null)} onUpdate={handleUpdateVacancy} /> )}
+      <div className={`fixed bottom-5 right-5 z-40 transition-transform duration-300 ease-in-out ${isChatWidgetOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
+          <button onClick={handleToggleChatWidget} className="aurora-button-primary w-14 h-14 sm:w-16 sm:h-16 text-white rounded-full flex items-center justify-center shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 animate-pulse-slow" aria-label="Открыть чат с ассистентом (Ctrl+K)"><MatthewLogoIcon className="w-7 h-7 sm:w-8 sm:h-8 text-white" /></button>
+      </div>
     </div>
   );
 };

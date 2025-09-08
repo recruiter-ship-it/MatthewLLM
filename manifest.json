@@ -1,18 +1,23 @@
-
 {
   "manifest_version": 3,
   "name": "MatthewLM Recruiting Tool (Beta)",
   "version": "1.0",
-  "description": "Ваш AI-ассистент для рекрутинга. Анализируйте резюме и общайтесь с AI на любой странице.",
+  "description": "AI-ассистент и агент для сорсинга и анализа кандидатов на веб-страницах.",
   "permissions": [
     "storage",
-    "scripting"
+    "scripting",
+    "activeTab"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "*://*.linkedin.com/*",
+    "*://*.hh.ru/*"
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.svg",
+      "48": "icons/icon48.svg",
+      "128": "icons/icon128.svg"
+    },
     "default_title": "Открыть MatthewLM Ассистент"
   },
   "background": {
@@ -20,23 +25,36 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["content.css"]
+      "matches": [
+        "*://*.linkedin.com/*",
+        "*://*.hh.ru/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ]
     }
   ],
   "web_accessible_resources": [
     {
       "resources": [
         "widget.html",
-        "pdf.worker.mjs"
+        "*.tsx",
+        "components/*.tsx",
+        "components/icons/*.tsx",
+        "utils/*.ts"
       ],
       "matches": [
-        "<all_urls>"
+        "*://*.linkedin.com/*",
+        "*://*.hh.ru/*"
       ]
     }
   ],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; object-src 'self'"
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon48.svg",
+    "128": "icons/icon128.svg"
   }
 }

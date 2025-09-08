@@ -69,25 +69,25 @@ const PdfViewer: React.FC<PdfViewerProps> = ({ pdfUrl }) => {
     <div className="w-full h-full flex flex-col">
         {error && <div className="m-auto text-red-600">{error}</div>}
         
-        <div className="flex-grow overflow-auto flex justify-center items-start p-4 relative">
+        <div className="flex-grow overflow-auto flex justify-center items-start p-4 relative bg-gray-50 dark:bg-gray-800">
             {isLoading && !error && (
-                <div className="absolute inset-0 bg-white/50 flex items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                <div className="absolute inset-0 bg-white/50 dark:bg-gray-800/50 flex items-center justify-center">
+                    <div className="w-8 h-8 border-4 border-blue-500 dark:border-blue-400 border-t-transparent rounded-full animate-spin"></div>
                 </div>
             )}
             <canvas ref={canvasRef} className="max-w-full h-auto" />
         </div>
 
         {numPages > 0 && !error && (
-            <div className="flex-shrink-0 flex items-center justify-center gap-4 p-2 bg-gray-100 border-t">
-                <button onClick={goToPrevPage} disabled={pageNum <= 1} className="p-1 rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200">
-                    <ChevronLeft className="w-5 h-5 text-gray-700"/>
+            <div className="flex-shrink-0 flex items-center justify-center gap-4 p-2 bg-gray-100 dark:bg-slate-700 border-t dark:border-slate-600">
+                <button onClick={goToPrevPage} disabled={pageNum <= 1} className="p-1 rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200 dark:hover:bg-slate-600">
+                    <ChevronLeft className="w-5 h-5 text-gray-700 dark:text-gray-300"/>
                 </button>
-                <span className="text-sm font-medium text-gray-700">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     Стр. {pageNum} из {numPages}
                 </span>
-                <button onClick={goToNextPage} disabled={pageNum >= numPages} className="p-1 rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200">
-                    <ChevronRight className="w-5 h-5 text-gray-700"/>
+                <button onClick={goToNextPage} disabled={pageNum >= numPages} className="p-1 rounded-full disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-200 dark:hover:bg-slate-600">
+                    <ChevronRight className="w-5 h-5 text-gray-700 dark:text-gray-300"/>
                 </button>
             </div>
         )}

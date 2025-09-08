@@ -4,27 +4,69 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MatthewLM Widget</title>
-    <link href="./tailwind.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      html, body, #root {
+      :root {
+        --bg-color: #f8f9fe;
+        --blur-strength: 16px;
+        --ui-bg: rgba(255, 255, 255, 0.5);
+        --ui-border: rgba(0, 0, 0, 0.08);
+        --text-primary: #111827;
+        --text-secondary: #4b5563;
+        --accent-color: #4f46e5;
+        --accent-color-end: #a855f7;
+      }
+      html.dark {
+        --bg-color: #111827;
+        --blur-strength: 24px;
+        --ui-bg: rgba(31, 41, 55, 0.5);
+        --ui-border: rgba(255, 255, 255, 0.12);
+        --text-primary: #e5e7eb;
+        --text-secondary: #9ca3af;
+        --accent-color: #818cf8;
+        --accent-color-end: #c084fc;
+        color-scheme: dark;
+      }
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: transparent; /* Widget body is transparent */
+        color: var(--text-primary);
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+      }
+      .aurora-panel {
+        background-color: var(--ui-bg) !important;
+        backdrop-filter: blur(var(--blur-strength)) !important;
+        -webkit-backdrop-filter: blur(var(--blur-strength)) !important;
+        border: 1px solid var(--ui-border) !important;
+      }
+      .aurora-button-primary {
+          background: linear-gradient(135deg, var(--accent-color) 0%, var(--accent-color-end) 100%);
+      }
+      #matthew-widget-root {
         height: 100%;
         width: 100%;
-        margin: 0;
-        padding: 0;
-        background-color: transparent;
-        font-family: 'Inter', sans-serif;
       }
-      /* Ensure that the widget container inside the iframe can receive pointer events */
-      #root > div {
-        pointer-events: auto;
-      }
+      @keyframes fade-in-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+      .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
     </style>
+     <script type="importmap">
+    {
+      "imports": {
+        "react-dom/": "https://esm.sh/react-dom@^18.2.0/",
+        "react/": "https://esm.sh/react@^18.2.0/",
+        "react": "https://esm.sh/react@^18.2.0",
+        "@google/genai": "https://esm.sh/@google/genai@^1.13.0"
+      }
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="./widget.bundle.js"></script>
+    <div id="matthew-widget-root"></div>
+    <script type="module" src="./widget.tsx"></script>
   </body>
 </html>

@@ -1,19 +1,24 @@
 
-.matthewlm-highlight {
-    background-color: #fde047; /* yellow-300 */
-    color: #1f2937; /* gray-800 */
-    padding: 2px 1px;
-    border-radius: 3px;
-    font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    animation: fade-in-highlight 0.5s ease-in-out;
+#matthew-lm-widget-iframe {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    width: 400px;
+    height: calc(100vh - 40px);
+    border: none;
+    z-index: 99999999;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+    border-radius: 16px;
+    transition: transform 0.3s ease-in-out;
+    transform: translateX(calc(100% + 20px));
+    display: none; /* Initially hidden */
 }
 
-@keyframes fade-in-highlight {
-    from {
-        background-color: #fef9c3; /* yellow-100 */
-    }
-    to {
-        background-color: #fde047; /* yellow-300 */
-    }
+#matthew-lm-widget-iframe.visible {
+    transform: translateX(0);
 }
+
+#matthew-lm-highlight-element {
+    /* Styles for this are applied directly in content.js for dynamic positioning */
+}
+      
