@@ -13,7 +13,8 @@
     "react": "^18.2.0",
     "@google/genai": "^1.13.0",
     "pdfjs-dist": "^4.4.168",
-    "recharts": "^2.12.7"
+    "recharts": "^2.12.7",
+    "react-router-dom": "^6.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
