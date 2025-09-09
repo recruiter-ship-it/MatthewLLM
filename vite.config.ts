@@ -12,7 +12,16 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-      }
+      },
+  build: {
+    rollupOptions: {
+      input: {
+        index: path.resolve(__dirname, 'index.html'),
+        web: path.resolve(__dirname, 'web.html'),
+      },
+    },
+  }
+
     }
   };
 });
