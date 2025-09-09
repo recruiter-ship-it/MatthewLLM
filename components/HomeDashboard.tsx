@@ -4,8 +4,6 @@ import { Home, Briefcase, Link } from './icons/Icons';
 import { generateContentWithFallback } from '../utils/gemini';
 import SharedBoard from './SharedBoard';
 
-declare const chrome: any;
-
 interface HomeDashboardProps {
     vacancies: Vacancy[];
     userWidgets: { [recruiterId: string]: WidgetLink[] };
@@ -13,9 +11,6 @@ interface HomeDashboardProps {
     activeRecruiterId: string | null;
 }
 
-
-// Fix: check for chrome API in a way that is compatible with TypeScript.
-const IS_EXTENSION = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
 
 const HomeDashboard: React.FC<HomeDashboardProps> = ({ 
     vacancies, 
@@ -38,20 +33,15 @@ const HomeDashboard: React.FC<HomeDashboardProps> = ({
             const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour cache
             const vacanciesSignature = JSON.stringify(vacancies.map(v => ({ id: v.id, priority: v.priority, resumes: v.resumes?.length })));
 
-            // Check cache
+            // Check cache from localStorage
             try {
-                let cachedItem = null;
-                if (IS_EXTENSION) {
-                    const data = await chrome.storage.local.get(SUMMARY_CACHE_KEY);
-                    cachedItem = data[SUMMARY_CACHE_KEY];
-                } else {
-                    const cachedStr = localStorage.getItem(SUMMARY_CACHE_KEY);
-                    if (cachedStr) cachedItem = JSON.parse(cachedStr);
-                }
-
-                if (cachedItem && cachedItem.signature === vacanciesSignature && (Date.now() - cachedItem.timestamp < CACHE_DURATION_MS)) {
-                    setSummary(cachedItem.summary);
-                    return; // Use cached summary and exit
+                const cachedStr = localStorage.getItem(SUMMARY_CACHE_KEY);
+                if (cachedStr) {
+                    const cachedItem = JSON.parse(cachedStr);
+                    if (cachedItem && cachedItem.signature === vacanciesSignature && (Date.now() - cachedItem.timestamp < CACHE_DURATION_MS)) {
+                        setSummary(cachedItem.summary);
+                        return; // Use cached summary and exit
+                    }
                 }
             } catch (e) {
                 console.warn("Could not read summary cache:", e);
@@ -75,14 +65,10 @@ const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 const newSummary = response.text;
                 setSummary(newSummary);
 
-                // Save to cache
+                // Save to localStorage cache
                 const cacheValue = { summary: newSummary, timestamp: Date.now(), signature: vacanciesSignature };
                 try {
-                    if (IS_EXTENSION) {
-                        await chrome.storage.local.set({ [SUMMARY_CACHE_KEY]: cacheValue });
-                    } else {
-                        localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(cacheValue));
-                    }
+                    localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(cacheValue));
                 } catch(e) {
                     console.warn("Could not save summary cache:", e);
                 }

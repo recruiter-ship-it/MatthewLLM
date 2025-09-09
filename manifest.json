@@ -1,60 +1,6 @@
 {
+  "name": "MatthewLM Recruiting Tool (Расширение отключено)",
   "manifest_version": 3,
-  "name": "MatthewLM Recruiting Tool (Beta)",
   "version": "1.0",
-  "description": "AI-ассистент и агент для сорсинга и анализа кандидатов на веб-страницах.",
-  "permissions": [
-    "storage",
-    "scripting",
-    "activeTab"
-  ],
-  "host_permissions": [
-    "*://*.linkedin.com/*",
-    "*://*.hh.ru/*"
-  ],
-  "action": {
-    "default_icon": {
-      "16": "icons/icon16.svg",
-      "48": "icons/icon48.svg",
-      "128": "icons/icon128.svg"
-    },
-    "default_title": "Открыть MatthewLM Ассистент"
-  },
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": [
-        "*://*.linkedin.com/*",
-        "*://*.hh.ru/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "widget.html",
-        "*.tsx",
-        "components/*.tsx",
-        "components/icons/*.tsx",
-        "utils/*.ts"
-      ],
-      "matches": [
-        "*://*.linkedin.com/*",
-        "*://*.hh.ru/*"
-      ]
-    }
-  ],
-  "icons": {
-    "16": "icons/icon16.svg",
-    "48": "icons/icon48.svg",
-    "128": "icons/icon128.svg"
-  }
+  "description": "Функциональность браузерного расширения была отключена. Пожалуйста, используйте веб-приложение."
 }
