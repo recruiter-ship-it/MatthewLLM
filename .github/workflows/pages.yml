@@ -19,27 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
       - name: Build
-        run: npm run build
-        env:
-          # API_KEY: ${{ secrets.API_KEY }}
-          # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
+          run: npm run build
       - name: SPA 404 fallback
         if: ${{ hashFiles('dist/index.html') != '' }}
-        run: cp dist/index.html dist/404.html
-
+          run: cp dist/index.html dist/404.html
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: dist
 
